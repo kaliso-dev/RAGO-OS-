@@ -1,0 +1,17 @@
+[package]
+name = "rago-common"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+license = "GPL-2.0-only"
+description = "Rago OS : topologie CPU (X3D / hybride), protocole et serveur du canal launcher -> scx_rago"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

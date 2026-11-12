@@ -1,0 +1,13 @@
+# Espace de travail Rust de Rago OS.
+# M0 : ordonnanceur scx_rago (fork de scx_lavd), brique commune, outil du launcher.
+[workspace]
+resolver = "3"
+members = [
+    "kernel/scx/scx_rago",
+    "kernel/scx/rago-common",
+    "host/bin/rago-sched-hint",
+]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

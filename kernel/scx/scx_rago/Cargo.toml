@@ -12,11 +12,12 @@
 [package]
 edition = "2024"
 rust-version = "1.91"
-name = "scx_lavd"
-version = "1.1.4"
+name = "scx_rago"
+version = "0.1.0"
 authors = [
     "Changwoo Min <changwoo@igalia.com>",
     "Igalia",
+    "Rago OS",
 ]
 build = "build.rs"
 autolib = false
@@ -24,8 +25,9 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "A Latency-criticality Aware Virtual Deadline (LAVD) scheduler based on sched_ext, which is a Linux kernel feature which enables implementing kernel thread schedulers in BPF and dynamically loading them. https://github.com/sched-ext/scx/tree/main"
+description = "Rago OS : ordonnanceur sched_ext informé par le launcher (fork de scx_lavd 1.1.4)"
 readme = "README.md"
+publish = false
 license = "GPL-2.0-only"
 
 [package.metadata.scx.ci.kernel]
@@ -35,8 +37,11 @@ blocklist = ["stable/6_12"]
 enable_backtrace = []
 
 [[bin]]
-name = "scx_lavd"
+name = "scx_rago"
 path = "src/main.rs"
+
+[dependencies.rago-common]
+path = "../rago-common"
 
 [dependencies.anyhow]
 version = "1"

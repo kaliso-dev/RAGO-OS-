@@ -9,6 +9,7 @@
 #include "intf.h"
 #include "lavd.bpf.h"
 #include "util.bpf.h"
+#include "rago.bpf.h" /* RAGO */
 #include <errno.h>
 #include <stdbool.h>
 #include <bpf/bpf_core_read.h>
@@ -473,6 +474,7 @@ static bool try_to_steal_task(struct cpdom_ctx *cpdomc)
 {
 	struct cpdom_ctx *cpdomc_pick;
 	s64 nr_nbr, cpdom_id;
+	int rago_rs; /* RAGO */
 
 	/*
 	 * Only active domains steal the tasks from other domains.
@@ -551,7 +553,16 @@ static bool try_to_steal_task(struct cpdom_ctx *cpdomc)
 			 * is_stealee/is_stealer flags via the decrement
 			 * helpers.
 			 */
-			if (consume_dsq(cpdomc_pick, dsq_id)) {
+			/*
+			 * RAGO: ne pas sortir un thread de rendu (ou un
+			 * thread de jeu sur X3D) de son masque jeu.
+			 */
+			rago_rs = rago_steal(dsq_id);
+			if (rago_rs == RAGO_STEAL_NONE)
+				continue;
+
+			if (rago_rs == RAGO_STEAL_MOVED ||
+			    consume_dsq(cpdomc_pick, dsq_id)) {
 				if (no_fast_lb) {
 					WRITE_ONCE(cpdomc_pick->is_stealee, false);
 					WRITE_ONCE(cpdomc->is_stealer, false);
@@ -586,6 +597,7 @@ static bool force_to_steal_task(struct cpdom_ctx *cpdomc)
 {
 	struct cpdom_ctx *cpdomc_pick;
 	s64 nr_nbr, cpdom_id;
+	int rago_rs; /* RAGO */
 
 	/*
 	 * Traverse neighbor compute domains in distance order.
@@ -637,7 +649,16 @@ static bool force_to_steal_task(struct cpdom_ctx *cpdomc)
 			 * conservation. Decrement budgets to keep
 			 * the accounting consistent.
 			 */
-			if (consume_dsq(cpdomc_pick, dsq_id)) {
+			/*
+			 * RAGO: ne pas sortir un thread de rendu (ou un
+			 * thread de jeu sur X3D) de son masque jeu.
+			 */
+			rago_rs = rago_steal(dsq_id);
+			if (rago_rs == RAGO_STEAL_NONE)
+				continue;
+
+			if (rago_rs == RAGO_STEAL_MOVED ||
+			    consume_dsq(cpdomc_pick, dsq_id)) {
 				if (!no_fast_lb) {
 					decrement_stealee_budget(cpdomc_pick, task_load);
 					decrement_stealer_budget(cpdomc, task_load);

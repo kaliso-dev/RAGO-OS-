@@ -185,6 +185,7 @@
 #include <bpf_experimental.h>
 #include "intf.h"
 #include "lavd.bpf.h"
+#include "rago.bpf.h" /* RAGO */
 #include "util.bpf.h"
 #include "power.bpf.h"
 #include <errno.h>
@@ -852,6 +853,9 @@ s32 BPF_STRUCT_OPS(lavd_select_cpu, struct task_struct *p, s32 prev_cpu,
 	if (!ictx.taskc || !ictx.cpuc_cur)
 		return prev_cpu;
 
+	/* RAGO: relire la classe connue par le launcher avant le placement. */
+	rago_refresh_task(p, ictx.taskc);
+
 	/*
 	 * Check whether it is a synchronous wake-up to boost
 	 * latency-criticality later.
@@ -946,6 +950,9 @@ void BPF_STRUCT_OPS(lavd_enqueue, struct task_struct *p, u64 enq_flags)
 		return;
 	}
 	task_cpu = scx_bpf_task_cpu(p);
+
+	/* RAGO: relire la classe connue par le launcher avant le placement. */
+	rago_refresh_task(p, taskc);
 
 	/*
 	 * A reenqueue (SCX_ENQ_REENQ) means the task was already placed once
@@ -2247,6 +2254,9 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(lavd_init_task, struct task_struct *p,
 	if (is_ksoftirqd(p))
 		set_task_flag(taskc, LAVD_FLAG_KSOFTIRQD);
 
+	/* RAGO: héritage du tag au fork + classement initial. */
+	rago_init_task(p, taskc, args->fork);
+
 	if (parent)
 		bpf_task_release(parent);
 	return 0;
@@ -2284,6 +2294,9 @@ s32 BPF_STRUCT_OPS(lavd_exit_task, struct task_struct *p,
 	 */
 	if (enable_cpu_bw && taskc)
 		scx_cgroup_bw_cancel((u64)taskc, SCX_CGROUP_BW_CANCEL_DROP);
+
+	/* RAGO: décompte et nettoyage des maps de tags. */
+	rago_exit_task(p, taskc);
 
 	scx_task_free_rcu(p);
 	return 0;
@@ -2779,6 +2792,11 @@ s32 BPF_STRUCT_OPS_SLEEPABLE(lavd_init)
 	if (err)
 		return err;
 
+	/* RAGO: masques jeu / fond issus de la détection de topologie. */
+	err = rago_init_cpumasks();
+	if (err)
+		return err;
+
 	/*
 	 * Initialize per-CPU context.
 	 */
@@ -2915,4 +2933,4 @@ SCX_OPS_DEFINE(lavd_ops,
 	       .init			= (void *)lavd_init,
 	       .exit			= (void *)lavd_exit,
 	       .timeout_ms		= 30000U,
-	       .name			= "lavd");
+	       .name			= "rago");

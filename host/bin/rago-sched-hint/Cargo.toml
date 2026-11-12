@@ -1,0 +1,20 @@
+[package]
+name = "rago-sched-hint"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+license = "GPL-2.0-only"
+description = "Rago OS : API hint launcher -> scx_rago (tague l'arbre du jeu avant son lancement)"
+publish = false
+
+[[bin]]
+name = "rago-sched-hint"
+path = "src/main.rs"
+
+[dependencies]
+rago-common = { path = "../../../kernel/scx/rago-common" }
+clap = { version = "4", features = ["derive", "env"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

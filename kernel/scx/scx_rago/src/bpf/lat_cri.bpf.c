@@ -10,6 +10,7 @@
 #include "lavd.bpf.h"
 #include "util.bpf.h"
 #include "power.bpf.h"
+#include "rago.bpf.h" /* RAGO */
 #include <errno.h>
 #include <stdbool.h>
 #include <bpf/bpf_core_read.h>
@@ -106,6 +107,12 @@ static u64 calc_weight_factor(struct task_struct *p, task_ctx *taskc)
 		reset_task_flag(taskc, LAVD_FLAG_NEED_LOCK_BOOST);
 		weight_boost += LAVD_LC_WEIGHT_BOOST_REGULAR;
 	}
+
+	/*
+	 * RAGO: le launcher a tagué cette tâche (jeu / thread de rendu) :
+	 * sa criticité est connue, pas devinée.
+	 */
+	weight_boost += rago_lat_weight_boost(taskc);
 
 	/*
 	 * Respect nice priority.
@@ -256,6 +263,13 @@ static void calc_lat_cri(struct task_struct *p, task_ctx *taskc)
 	if (have_little_core) {
 		sum_runtime_ft = calc_sum_runtime_factor(p, taskc);
 		perf_cri = log_wwf + log2x(sum_runtime_ft);
+		/*
+		 * RAGO: une tâche du jeu est toujours sensible à la performance
+		 * CPU, pour que lavd la considère « grosse » (P-core) même
+		 * quand rago_pick_cpu() la laisse déborder.
+		 */
+		if (taskc->rago_class >= RAGO_CLASS_GAME)
+			perf_cri = max(perf_cri, sys_stat.max_perf_cri);
 	}
 	taskc->perf_cri = perf_cri;
 }

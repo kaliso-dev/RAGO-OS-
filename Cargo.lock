@@ -1232,6 +1232,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
+name = "rago-common"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tempfile",
+]
+
+[[package]]
+name = "rago-sched-hint"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "rago-common",
+ "tempfile",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1366,8 +1384,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "scx_lavd"
-version = "1.1.4"
+name = "scx_rago"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "bitvec",
@@ -1384,6 +1402,7 @@ dependencies = [
  "nix",
  "ordered-float",
  "plain",
+ "rago-common",
  "rlimit",
  "scx_arena",
  "scx_cargo",

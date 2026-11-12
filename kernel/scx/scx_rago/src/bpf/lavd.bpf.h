@@ -268,6 +268,11 @@ struct task_ctx {
 	/* --- per-CPU warmth (cache/TLB state) --- */
 	u64	last_stopping_clk;	/* when cpu_heat was last integrated (task stopped) */
 	u16	cpu_heat;		/* residence-integrated heat for cpu_id [0, LAVD_SCALE] */
+
+	/* --- RAGO: classe connue par le launcher (rago.bpf.c) --- */
+	u8	rago_class;		/* enum rago_class courante */
+	u8	rago_counted;		/* classe comptée dans rago_stats */
+	u64	rago_refresh_clk;	/* dernière relecture des maps de tags */
 } __attribute__((aligned(CACHELINE_SIZE)));
 
 /*

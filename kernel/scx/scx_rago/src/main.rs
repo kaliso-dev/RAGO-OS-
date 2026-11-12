@@ -13,6 +13,7 @@ mod bpf_streams;
 pub use bpf_intf::*;
 
 mod cpu_order;
+mod rago; // RAGO
 use scx_utils::Topology;
 use scx_utils::init_libbpf_logging;
 mod stats;
@@ -70,7 +71,9 @@ use stats::SysStats;
 use tracing::{debug, info, warn};
 use tracing_subscriber::filter::EnvFilter;
 
-const SCHEDULER_NAME: &str = "scx_lavd";
+const SCHEDULER_NAME: &str = "scx_rago";
+/// scx_rago (Rago OS) : fork de scx_lavd informé par le launcher Rago.
+///
 /// scx_lavd: Latency-criticality Aware Virtual Deadline (LAVD) scheduler
 ///
 /// The rust part is minimal. It processes command line options and logs out
@@ -338,6 +341,10 @@ struct Opts {
     /// Topology configuration options
     #[clap(flatten)]
     topology: Option<TopologyArgs>,
+
+    /// RAGO: options du canal launcher -> ordonnanceur et du routage.
+    #[clap(flatten, next_help_heading = "Rago Options")]
+    rago: rago::RagoOpts,
 }
 
 impl Opts {
@@ -534,7 +541,12 @@ struct Scheduler<'a> {
 }
 
 impl<'a> Scheduler<'a> {
-    fn init(opts: &'a Opts, open_object: &'a mut MaybeUninit<OpenObject>) -> Result<Self> {
+    fn init(
+        opts: &'a Opts,
+        open_object: &'a mut MaybeUninit<OpenObject>,
+        rago_topo: &rago_common::Topology,
+        rago_state: &rago_common::server::ServerState,
+    ) -> Result<Self> {
         if *NR_CPU_IDS > LAVD_CPU_ID_MAX as usize {
             panic!(
                 "Num possible CPU IDs ({}) exceeds maximum of ({})",
@@ -582,6 +594,9 @@ impl<'a> Scheduler<'a> {
         // Initialize skel according to @opts.
         Self::init_globals(&mut skel, opts, &order, debug_level)?;
 
+        // RAGO: masques jeu / fond et options de routage.
+        rago::init_rodata(&mut skel, &opts.rago, rago_topo);
+
         // Mirror the cpu.max caps into rodata so the BPF admission gates match
         // the map sizes set just below.
         if let Some(rodata) = skel.maps.rodata_data.as_mut() {
@@ -602,6 +617,10 @@ impl<'a> Scheduler<'a> {
         let mut skel = scx_ops_load!(skel, lavd_ops, uei)?;
         let task_size = std::mem::size_of::<types::task_ctx>();
         let arenalib = ArenaLib::setup(skel.object_mut(), task_size, 0, *NR_CPU_IDS)?;
+
+        // RAGO: brancher les maps de tags avant l'attachement, pour que les
+        // jeux déjà tagués soient reconnus dès la première décision.
+        rago::install_maps(rago_state, &skel)?;
 
         // Attach.
         let struct_ops = Some(scx_ops_attach!(skel, lavd_ops)?);
@@ -1107,7 +1126,12 @@ impl<'a> Scheduler<'a> {
         (true, profile)
     }
 
-    fn run(&mut self, opts: &Opts, shutdown: Arc<AtomicBool>) -> Result<UserExitInfo> {
+    fn run(
+        &mut self,
+        opts: &Opts,
+        shutdown: Arc<AtomicBool>,
+        rago_state: &rago_common::server::ServerState,
+    ) -> Result<UserExitInfo> {
         let (res_ch, req_ch) = self.stats_server.channels();
         let mut autopower = opts.autopower;
         let mut profile = PowerProfile::Unknown;
@@ -1124,6 +1148,9 @@ impl<'a> Scheduler<'a> {
             if autopower {
                 (autopower, profile) = self.update_power_profile(profile);
             }
+
+            // RAGO: compteurs pour « rago-sched-hint status ».
+            rago::publish_stats(rago_state, &self.skel);
 
             match req_ch.recv_timeout(Duration::from_secs(1)) {
                 Ok(req) => {
@@ -1142,6 +1169,8 @@ impl<'a> Scheduler<'a> {
         }
 
         bpf_streams::dump_bpf_streams(&mut self.skel);
+        // RAGO: débrancher les maps ; le registre des tags est conservé.
+        let _ = rago_state.remove_sink();
         let _ = self.struct_ops.take();
         uei_report!(&self.skel, uei)
     }
@@ -1203,7 +1232,7 @@ fn init_log(opts: &Opts) {
 fn main(mut opts: Opts) -> Result<()> {
     if opts.version {
         println!(
-            "scx_lavd {}",
+            "scx_rago {} (fork de scx_lavd 1.1.4)",
             build_id::full_version(env!("CARGO_PKG_VERSION"))
         );
         return Ok(());
@@ -1227,7 +1256,7 @@ fn main(mut opts: Opts) -> Result<()> {
     }
 
     if let Some(run_id) = opts.run_id {
-        info!("scx_lavd run_id: {}", run_id);
+        info!("scx_rago run_id: {}", run_id);
     }
 
     if opts.monitor.is_none() && opts.monitor_sched_samples.is_none() {
@@ -1262,19 +1291,29 @@ fn main(mut opts: Opts) -> Result<()> {
         }
     }
 
-    let mut open_object = MaybeUninit::uninit();
-    loop {
-        let mut sched = Scheduler::init(&opts, &mut open_object)?;
-        info!(
-            "scx_lavd scheduler is initialized (build ID: {})",
-            build_id::full_version(env!("CARGO_PKG_VERSION"))
-        );
-        info!("scx_lavd scheduler starts running.");
-        trim_heap_after_init();
-        if !sched.run(&opts, shutdown.clone())?.should_restart() {
-            break;
-        }
-    }
+    // RAGO: topologie et canal launcher, créés une fois et conservés à
+    // travers les rechargements de l'ordonnanceur.
+    let rago_topo = rago::resolve_topology(&opts.rago)?;
+    let rago_state = rago::start_server(&opts.rago, rago_topo.clone(), shutdown.clone())?;
 
-    Ok(())
+    let mut open_object = MaybeUninit::uninit();
+    let res = (|| -> Result<()> {
+        loop {
+            let mut sched = Scheduler::init(&opts, &mut open_object, &rago_topo, &rago_state)?;
+            info!(
+                "scx_rago scheduler is initialized (build ID: {})",
+                build_id::full_version(env!("CARGO_PKG_VERSION"))
+            );
+            info!("scx_rago scheduler starts running.");
+            trim_heap_after_init();
+            if !sched.run(&opts, shutdown.clone(), &rago_state)?.should_restart() {
+                break;
+            }
+        }
+        Ok(())
+    })();
+
+    shutdown.store(true, Ordering::Relaxed);
+    rago::cleanup_socket(&opts.rago.socket);
+    res
 }

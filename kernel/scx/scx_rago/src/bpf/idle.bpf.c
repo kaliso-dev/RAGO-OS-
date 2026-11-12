@@ -10,6 +10,7 @@
 #include "lavd.bpf.h"
 #include "util.bpf.h"
 #include "power.bpf.h"
+#include "rago.bpf.h" /* RAGO */
 #include <lib/topology.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -835,6 +836,19 @@ s32 pick_idle_cpu(struct pick_ctx *ctx, bool extend_ovrflw, bool *is_idle)
 		goto unlock_out;
 	}
 	/* NOTE: Now task @p is not a per-CPU task. */
+
+	/*
+	 * RAGO: routage informé par le launcher (jeu -> CCD X3D / P-cores,
+	 * fond -> autre CCD / E-cores). Si Rago ne décide pas, la logique
+	 * lavd d'origine continue.
+	 */
+	cpu = rago_pick_cpu(ctx, is_idle);
+	if (cpu >= 0) {
+		if (!bpf_cpumask_test_cpu(cpu, cast_mask(ctx->active)))
+			ovrflw_test_and_set(ctx->ovrflw, cpu);
+		goto unlock_out;
+	}
+	cpu = -ENOENT;
 
 	/*
 	 * Warm-CPU preference: Prefer the previous CPU while its cache and TLB

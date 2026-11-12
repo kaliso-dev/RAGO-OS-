@@ -166,4 +166,7 @@ struct power_arg {
 	s32	power_mode;
 };
 
+/* RAGO: interface du canal launcher -> ordonnanceur */
+#include "rago_intf.h"
+
 #endif /* __INTF_H */

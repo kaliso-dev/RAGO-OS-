@@ -17,6 +17,7 @@ fn main() {
         .add_source("src/bpf/preempt.bpf.c")
         .add_source("src/bpf/sys_stat.bpf.c")
         .add_source("src/bpf/util.bpf.c")
+        .add_source("src/bpf/rago.bpf.c")
         .add_source("src/bpf/lib/arena.bpf.c")
         .add_source("src/bpf/lib/common.bpf.c")
         .add_source("src/bpf/lib/atq.bpf.c")
