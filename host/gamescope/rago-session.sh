@@ -46,6 +46,7 @@ for lib in "${RAGO_PROTON_LIB:-}" "$here/../lib/rago_proton_lib.sh" /usr/lib/rag
 	fi
 done
 declare -F rago_pl_conf_get >/dev/null || { echo "rago-session : rago_proton_lib.sh introuvable" >&2; exit 1; }
+rago_pl_path_games /usr/games # steam et gamescope dans /usr/games (Debian / Ubuntu)
 
 print=0 nested=0 sync=1
 while [ $# -gt 0 ]; do

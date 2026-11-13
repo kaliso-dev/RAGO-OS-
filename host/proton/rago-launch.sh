@@ -51,6 +51,7 @@ if ! declare -F rago_pl_conf_get >/dev/null; then
 	[ "${1:-}" = "--" ] && shift
 	exec "$@"
 fi
+rago_pl_path_games /usr/games # gamemoderun dans /usr/games (Debian / Ubuntu)
 
 info() { [ "${RAGO_LAUNCH_QUIET:-0}" = 1 ] || printf 'rago-launch : %s\n' "$*" >&2; }
 warn() { printf 'rago-launch : attention : %s\n' "$*" >&2; }

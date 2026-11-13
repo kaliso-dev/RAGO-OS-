@@ -5,3 +5,5 @@
 /kernel/out/
 # Journal de la dernière VM de test (--keep)
 /kernel/tests/vm/last_vm_console.log
+# Python (tests de M2)
+__pycache__/

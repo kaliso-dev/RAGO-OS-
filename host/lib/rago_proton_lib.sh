@@ -312,6 +312,15 @@ rago_pl_steam_root() {
 # fossilize-replay à utiliser : RAGO_FOSSILIZE_REPLAY, celui du système, sinon
 # celui que Steam fournit (ubuntu12_64/fossilize_replay).
 #   rago_pl_fossilize_bin <racine Steam ou vide>
+# Debian / Ubuntu rangent steam et gamescope dans /usr/games, absent du PATH de
+# sudo (secure_path) : on l'ajoute en dernier pour les trouver quand même.
+rago_pl_path_games() { # rago_pl_path_games [dossier] (défaut /usr/games ; tests)
+	local d=${1:-/usr/games}
+	case ":$PATH:" in *":$d:"*) return 0 ;; esac
+	[ -d "$d" ] && PATH="${PATH:+$PATH:}$d"
+	return 0
+}
+
 rago_pl_fossilize_bin() {
 	local b
 	if [ -n "${RAGO_FOSSILIZE_REPLAY:-}" ]; then

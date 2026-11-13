@@ -214,5 +214,11 @@ done
 envs=$(RAGO_SESSION_VRR=0 RAGO_SESSION_HDR=0 RAGO_SESSION_TEARING=0 RAGO_SESSION_MANGOAPP=0 rago_pl_session_env)
 check "env session : capacités coupées" 0 "$(printf '%s\n' "$envs" | grep -cE 'VRR|HDR|TEARING|MANGOAPP')"
 
+mkdir -p "$tmp/games"
+check "path_games : ajouté à la fin" "/a:/b:$tmp/games" "$(PATH=/a:/b; rago_pl_path_games "$tmp/games"; echo "$PATH")"
+check "path_games : pas deux fois" "/a:$tmp/games:/b" "$(PATH="/a:$tmp/games:/b"; rago_pl_path_games "$tmp/games"; echo "$PATH")"
+# shellcheck disable=SC2123 # PATH factice voulu
+check "path_games : dossier absent -> rien" "/a" "$(PATH=/a; rago_pl_path_games "$tmp/nope"; echo "$PATH")"
+
 printf '%d tests OK, %d échec(s)\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

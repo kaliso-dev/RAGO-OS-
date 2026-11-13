@@ -67,6 +67,7 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source-path=SCRIPTDIR source=lib/rago_proton_lib.sh
 . "$here/lib/rago_proton_lib.sh"
+rago_pl_path_games /usr/games
 
 LOCK=${RAGO_PROTON_LOCK:-$here/proton/sources.lock} # RAGO_PROTON_LOCK : tests
 SRC_LAUNCH="$here/proton/rago-launch.sh"
@@ -297,6 +298,15 @@ pkg_manager() {
 }
 
 # --- deps ----------------------------------------------------------------------------------
+# Paquet disponible dans les dépôts apt ? Sortie lue en entier d'abord : avec
+# pipefail, « apt-cache … | grep -q » échoue (SIGPIPE) même quand il trouve.
+apt_has() {
+	local c
+	c=$(apt-cache policy "$1" 2>/dev/null) || return 1
+	c=$(sed -n 's/^ *Candidate: //p' <<< "$c")
+	[ -n "$c" ] && [ "$c" != "(none)" ]
+}
+
 step_deps() {
 	need_root deps
 	[ -z "$R" ] || die "deps ne marche pas avec --root"
@@ -318,20 +328,26 @@ step_deps() {
 		run pacman -S --needed --noconfirm $pkgs
 		;;
 	apt)
-		if ! dpkg --print-foreign-architectures | grep -qx i386; then
+		if ! grep -qx i386 <<< "$(dpkg --print-foreign-architectures)"; then
 			[ "$enable_32bit" = 1 ] || die "l'architecture i386 (bibliothèques 32 bits de Steam) n'est pas activée : relancer avec --enable-32bit, ou : dpkg --add-architecture i386 && apt-get update"
 			run dpkg --add-architecture i386
 			run apt-get update
 		fi
 		pkgs="steam-installer gamemode mangohud python3 polkitd pkexec libcap2-bin curl tar ca-certificates"
 		if [ "$S_SESSION" = 1 ]; then
-			if apt-cache policy gamescope 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+			if apt_has gamescope; then
 				pkgs="$pkgs gamescope"
 			else
 				warn "gamescope n'est pas dans les dépôts de cette distribution : session plein écran impossible ici"
 			fi
 		fi
-		[ "$S_LUTRIS" = 1 ] && pkgs="$pkgs lutris python3-yaml"
+		if [ "$S_LUTRIS" = 1 ]; then
+			if apt_has lutris; then
+				pkgs="$pkgs lutris python3-yaml"
+			else
+				warn "Lutris n'est pas dans les dépôts de cette distribution (multiverse non activé ?) : l'installer depuis lutris.net, puis relancer « user »"
+			fi
+		fi
 		# Steam demande d'accepter sa licence (debconf) : pas en silence.
 		# shellcheck disable=SC2086
 		run apt-get install -y $pkgs
@@ -671,12 +687,12 @@ verify_live() {
 	if have steam; then ok "Steam installé ($(command -v steam))"; else ko "Steam absent (sudo $0 deps)"; fi
 	if have python3; then ok "python3 (rago-steam-config)"; else ko "python3 absent : hook Steam impossible"; fi
 	if have gamemoderun; then ok "gamemode ($(command -v gamemoderun))"; else ko "gamemode absent (sudo $0 deps)"; fi
-	if have pkaction; then
-		if pkaction --action-id com.feralinteractive.GameMode.governor-helper >/dev/null 2>&1; then
-			ok "polkit connaît l'action gouverneur de gamemode (la règle Rago s'applique)"
-		else
-			att "action polkit de gamemode introuvable (gamemode trop ancien ?)"
-		fi
+	# Fichier d'actions lu directement : pkaction demande polkitd en marche.
+	if grep -qs 'com.feralinteractive.GameMode.governor-helper' "$R/usr/share/polkit-1/actions/com.feralinteractive.GameMode.policy" ||
+		{ have pkaction && pkaction --action-id com.feralinteractive.GameMode.governor-helper >/dev/null 2>&1; }; then
+		ok "polkit connaît l'action gouverneur de gamemode (la règle Rago s'applique)"
+	elif have gamemoderun; then
+		att "action polkit de gamemode introuvable (gamemode trop ancien ?)"
 	fi
 	if have mangohud; then ok "MangoHud ($(command -v mangohud))"; else ko "MangoHud absent (sudo $0 deps)"; fi
 	read -r ver url hash < <(rago_pl_lock_get "$LOCK" proton-ge) || true
