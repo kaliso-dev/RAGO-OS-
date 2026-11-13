@@ -193,14 +193,15 @@ backup_path() { local p=${1#/}; echo "$(state backup)/${p//\//%}"; }
 is_ours() { grep -qs "$RAGO_ENC_MARKER" "$1"; }
 
 # Sauvegarde (une seule fois) d'un fichier système avant sa première modification.
+# S'il n'existait pas, « <sauvegarde>.absent » le note (pour ne pas sauvegarder
+# plus tard le fichier écrit par Rago comme s'il était d'origine).
 backup_once() {
 	local p=$1 b
 	[ "$dry_run" = 1 ] && return 0
-	[ -e "$R$p" ] || return 0
 	b=$(backup_path "$p")
-	[ -e "$b" ] && return 0
+	{ [ -e "$b" ] || [ -e "$b.absent" ]; } && return 0
 	mkdir -p "$(dirname "$b")"
-	cp -a "$R$p" "$b"
+	if [ -e "$R$p" ]; then cp -a "$R$p" "$b"; else : > "$b.absent"; fi
 }
 
 # Écrit l'entrée standard dans <chemin> (atomique, mode donné).
@@ -283,8 +284,10 @@ get_pass() {
 }
 
 # La passphrase ouvre-t-elle ce volume ? (rien n'est ouvert)
+# --disable-external-tokens : sans lui, cryptsetup essaie d'abord le jeton TPM2
+# et réussit sans même lire la passphrase (le test ne prouverait rien).
 pass_opens() {
-	printf '%s\n' "$PASS" | cryptsetup open --test-passphrase --batch-mode "$1" >/dev/null 2>&1
+	printf '%s\n' "$PASS" | cryptsetup open --test-passphrase --disable-external-tokens --batch-mode "$1" >/dev/null 2>&1
 }
 
 # --- réglages -----------------------------------------------------------------------
@@ -649,7 +652,7 @@ check_tools() {
 }
 
 check_tpm() {
-	local pcrs sb man line n v bad=""
+	local pcrs sb man n v bad="" tpm=1
 	if tpm_kernel_present; then
 		man=$(cat "$SYS/class/tpm/tpm0/device/description" 2>/dev/null || true)
 		ok "TPM 2.0 présent${man:+ ($man)}"
@@ -658,19 +661,21 @@ check_tpm() {
 		ok "TPM donné : $TPM2_DEVICE"
 	else
 		ko "pas de TPM 2.0 : pas de déverrouillage automatique (activer fTPM / PTT dans le BIOS)"
-		return 0
+		tpm=0
 	fi
-	pcrs=$(read_pcrs || true)
-	if [ -z "$pcrs" ]; then
-		att "PCR $PCRS illisibles (banque sha256 ; tpm2-tools absent ?)"
-	else
-		while read -r n v; do
-			if rago_pcr_is_unmeasured "$v"; then bad="$bad $n"; fi
-		done <<<"$pcrs"
-		if [ -n "$bad" ]; then
-			ko "PCR${bad} jamais mesurés : le firmware ne mesure pas le démarrage, le TPM ne protégerait rien"
+	if [ "$tpm" = 1 ]; then
+		pcrs=$(read_pcrs || true)
+		if [ -z "$pcrs" ]; then
+			att "PCR $PCRS illisibles (banque sha256 ; tpm2-tools absent ?)"
 		else
-			ok "PCR $PCRS mesurés par le firmware (banque sha256)"
+			while read -r n v; do
+				if rago_pcr_is_unmeasured "$v"; then bad="$bad $n"; fi
+			done <<<"$pcrs"
+			if [ -n "$bad" ]; then
+				ko "PCR${bad} jamais mesurés : le firmware ne mesure pas le démarrage, le TPM ne protégerait rien"
+			else
+				ok "PCR $PCRS mesurés par le firmware (banque sha256)"
+			fi
 		fi
 	fi
 	if [ -d "$SYS/firmware/efi" ]; then ok "démarrage UEFI"; else ko "démarrage BIOS (legacy) : Secure Boot et PCR 7 impossibles"; fi
@@ -680,7 +685,6 @@ check_tpm() {
 	off) att "Secure Boot inactif : quand tu l'activeras (exigé par l'anti-triche), PCR 7 changera → passphrase puis « reseal »" ;;
 	*) skip "état Secure Boot illisible" ;;
 	esac
-	: "$line"
 }
 
 step_check() {
@@ -756,7 +760,7 @@ step_format() {
 # Ouvre avec la passphrase lue sur l'entrée standard (une ligne) et garde dans
 # l'en-tête les réglages de performance (TRIM, sans files d'attente dm-crypt).
 open_with_pass() { # open_with_pass <volume> <nom>
-	local a=(--perf-no_read_workqueue --perf-no_write_workqueue --persistent)
+	local a=(--disable-external-tokens --perf-no_read_workqueue --perf-no_write_workqueue --persistent)
 	[ "$DISCARD" = 1 ] && a+=(--allow-discards)
 	cryptsetup open "${a[@]}" "$1" "$2"
 }
@@ -928,8 +932,9 @@ resolve_volumes() {
 	r=$(uuid_of "$o_root_uuid" "$o_root_dev" --root-device)
 	s=$(uuid_of "$o_swap_uuid" "$o_swap_dev" --swap-device)
 	o=$(uuid_of "$o_other_uuid" "$o_other_dev" --other-slot-device)
-	if [ -z "$r" ] && [ -z "$R" ]; then
-		r=$(mounted_root_luks_uuid || true)
+	# Sans volume donné : la racine montée, sinon les réglages déjà enregistrés.
+	if [ -z "$r" ]; then
+		[ -n "$R" ] || r=$(mounted_root_luks_uuid || true)
 		[ -n "$r" ] || r=$(this_root_uuid)
 	fi
 	[ -n "$r" ] || die "racine chiffrée introuvable : --root-device ou --root-uuid"

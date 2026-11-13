@@ -272,6 +272,7 @@ rago_crypttab_entry() {
 rago_crypttab_merge() {
 	local file=$1 l names="" devs="" dev
 	shift
+	[ -r "$file" ] || file=/dev/null # pas encore de crypttab (Ubuntu) : vide
 	for l in "$@"; do
 		names="$names ${l%% *}"
 		dev=$(echo "$l" | awk '{ print $2 }')
@@ -288,7 +289,7 @@ rago_crypttab_merge() {
 		($1 in ours) { next }
 		(tolower($2) in ourdev) { next }
 		{ print }
-	' "$file" 2>/dev/null
+	' "$file"
 	for l in "$@"; do
 		printf '# %s : volume %s (module M3 ; ne pas ajouter « swap » / « tmp » ni de fichier de clé)\n' "$RAGO_ENC_MARKER" "${l%% *}"
 		printf '%s\n' "$l"
@@ -300,13 +301,14 @@ rago_crypttab_merge() {
 rago_crypttab_remove() {
 	local file=$1
 	shift
+	[ -r "$file" ] || file=/dev/null
 	awk -v names="$*" -v marker="$RAGO_ENC_MARKER" '
 		BEGIN { n = split(names, a, " "); for (i = 1; i <= n; i++) ours[a[i]] = 1 }
 		index($0, "# " marker) == 1 { next }
 		/^[[:space:]]*(#|$)/ { print; next }
 		($1 in ours) { next }
 		{ print }
-	' "$file" 2>/dev/null
+	' "$file"
 }
 
 # --- fstab (swap d'hibernation) -----------------------------------------------
@@ -319,12 +321,14 @@ rago_fstab_swap_line() {
 # périphérique (ou pour l'UUID du swap, 4e argument facultatif), garde le reste.
 #   rago_fstab_swap_merge <fichier ou /dev/null> <périphérique> <priorité> [UUID=…]
 rago_fstab_swap_merge() {
+	local file=$1
+	[ -r "$file" ] || file=/dev/null
 	awk -v dev="$2" -v alt="${4:-}" -v marker="$RAGO_ENC_MARKER" '
 		index($0, "# " marker) == 1 { next }
 		/^[[:space:]]*(#|$)/ { print; next }
 		$3 == "swap" && ($1 == dev || (alt != "" && $1 == alt)) { next }
 		{ print }
-	' "$1" 2>/dev/null
+	' "$file"
 	printf '# %s : swap chiffré de l'"'"'hibernation (Fast OS Switch, M6)\n' "$RAGO_ENC_MARKER"
 	rago_fstab_swap_line "$2" "$3"
 }

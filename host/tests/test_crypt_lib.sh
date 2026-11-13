@@ -177,6 +177,9 @@ printf '%s\n' "$merged" > "$tmp/crypttab2"
 again=$(rago_crypttab_merge "$tmp/crypttab2" "$l1" "$l2")
 check "fusion idempotente" "$merged" "$again"
 check "crypttab vide" "2" "$(rago_crypttab_merge /dev/null "$l1" "$l2" | grep -vc '^#')"
+check "crypttab absente (set -e)" "2" "$(set -e; rago_crypttab_merge "$tmp/absente" "$l1" "$l2" | grep -vc '^#')"
+check "crypttab absente : retrait sans erreur" "0" "$(set -e; rago_crypttab_remove "$tmp/absente" rago-root; echo $?)"
+check "fstab absent (set -e)" "/dev/mapper/rago-swap none swap defaults,pri=10 0 0" "$(set -e; rago_fstab_swap_merge "$tmp/absent" /dev/mapper/rago-swap 10 | grep -v '^#')"
 removed=$(rago_crypttab_remove "$tmp/crypttab2" rago-root rago-swap)
 check "retrait : seules les entrées du joueur" "data" "$(grep -v '^[[:space:]]*#' <<<"$removed" | awk 'NF { print $1 }')"
 check_rc "entrée absente" 1 rago_crypttab_entry "$tmp/crypttab" nope
