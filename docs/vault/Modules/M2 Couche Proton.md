@@ -6,7 +6,7 @@ statut: EN COURS
 ---
 # M2 Couche Proton
 
-> Phase A. Statut : **EN COURS** — code écrit le 13/11/2026, testé sans matériel (conteneur, chroot Ubuntu 25.10 avec les vrais paquets) ; **jamais testé sur vrai matériel**. Branche `claude/project-thread-8h2mbw`, PR #5 vers `main` (à relire). Affichage, VRR, HDR, tearing, `--rt`, FPS et effet du pré-chauffage : **en attente de matériel**. Retour à [[Projet]], carte [[Architecture]], vue d'ensemble [[Couche Proton]].
+> Phase A. Statut : **EN COURS** — code écrit le 13/11/2026, testé sans matériel (conteneur, chroot Ubuntu 25.10 avec les vrais paquets) ; **jamais testé sur vrai matériel**. Fusionné dans `main` le 13/11 (PR #5). Proton-GE et Heroic restent à épingler (`host/setup_proton_layer.sh lock`, GitHub inaccessible depuis l'environnement de Claude). Affichage, VRR, HDR, tearing, `--rt`, FPS et effet du pré-chauffage : **en attente de matériel**. Retour à [[Projet]], carte [[Architecture]], vue d'ensemble [[Couche Proton]].
 
 **Objectif.** Jeu natif Linux d'élite (Proton), avec les accroches profils ([[M14 Profils par jeu]]) et hint ordonnanceur ([[M0 Noyau scx_rago]]), par-dessus la base [[M1 Tuning hôte]].
 

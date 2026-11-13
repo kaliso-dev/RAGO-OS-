@@ -19,6 +19,8 @@ Chaque décision de Sofiene, datée. Retour à [[Projet]]. La plus récente prim
 
 - **13/11 — M2 ensuite, et lui seul.** « Prochain module : M2 » ; « développe le Module M2, et lui seul » ; « Hook de lancement : au démarrage d'un jeu, applique son profil via rago-profiled (M14) et appelle le hint scheduler via rago-sched-hint (M0). Cohérent avec M1 (base) et M14 (surcharge par jeu) » ; « Teste ce qui est testable sans matériel […] ; marque clairement les parties affichage/VRR/HDR/FPS comme « en attente de matériel » ». Voir [[M2 Couche Proton]].
 
+- **13/11 — M3 ensuite, et lui seul.** « Développe le Module M3, et lui seul » ; « Détecte AES-NI/AVX2 (avertit sinon) ; luksFormat luks2 aes-xts-plain64 key-size 512 sha512 argon2id ; enrôle le TPM via systemd-cryptenroll --tpm2-pcrs=0+7 ET une passphrase de secours obligatoire ; met à jour /etc/crypttab (tpm2-device=auto) et l'initramfs (détecte dracut/mkinitcpio) » ; « Compatible avec le swap d'hibernation chiffré du switch (M6, déverrouillé avant resume) et les deux slots A/B (M4) » ; « Avertit du risque PCR7 après update firmware (d'où la passphrase de secours) ». Sécurité : « Teste UNIQUEMENT sur des disques virtuels (loop devices / VM avec swtpm pour émuler le TPM). JAMAIS sur un vrai disque. La passphrase de secours est OBLIGATOIRE (ne jamais laisser le TPM comme seul moyen de déverrouillage). » ; « Marque le vrai auto-unlock TPM matériel comme « en attente de matériel » ». Voir [[M3 Chiffrement LUKS]].
+
 ## Choix techniques de Claude (M0, 12/11) — à valider par Sofiene
 Ce ne sont pas des décisions de Sofiene : choix d'implémentation faits pendant M0, modifiables.
 - **Noyau 6.18 LTS** comme base (≥ 6.12 demandé ; LTS = correctifs longtemps). Version exacte épinglée dans `kernel/patches/sources.lock`.
@@ -59,6 +61,18 @@ Ce ne sont pas des décisions de Sofiene : choix d'implémentation faits pendant
 - **Pré-chauffage** : `fossilize-replay` en priorité basse, en fond (`background`, défaut), pause pendant les jeux, tampon par base, tout refait si le pilote Vulkan change ; `before` (avant le jeu) et `off` en option.
 - **HUD** : dans la session gamescope, mangoapp (réglable depuis Steam) ; hors session, MangoHud par jeu ; jamais les deux. `/etc/MangoHud.conf` compact (FPS, 1 % low, temps d'image), Shift droit + F12 pour cacher.
 - **Session** : VRR, HDR, tearing en jeu, `--rt` activés par défaut (gamescope reçoit `cap_sys_nice`), mode natif de l'écran ; tout se coupe dans `/etc/rago/proton-layer.conf`.
+
+## Choix techniques de Claude (M3, 13/11) — à valider par Sofiene
+- **Trois volumes LUKS2** : `rago-a` et `rago-b` (racine de chaque slot de [[M4 Updates A-B]]) et `rago-swap` (swap d'hibernation). La racine s'ouvre **toujours sous le nom `rago-root`** : chaque slot a sa crypttab (et donc son initramfs) qui nomme son propre volume, et la ligne de commande du noyau est la même pour les deux slots (`root=/dev/mapper/rago-root resume=/dev/mapper/rago-swap`). Conséquence pour M4 : une initramfs par slot.
+- **Dans l'initramfs, seulement les volumes du démarrage** (racine + swap) : `/etc/crypttab.initramfs`, lue telle quelle par le hook sd-encrypt de mkinitcpio, mise dans l'image dracut par le module `91rago-crypttab`. Les autres volumes du joueur s'ouvrent après, depuis `/etc/crypttab`.
+- **dracut ou mkinitcpio seulement** : initramfs-tools (Debian / Ubuntu par défaut) est refusé, il ne sait pas déverrouiller par TPM2 ; `deps` installe dracut.
+- **PCR jamais mesurés refusés** (tout à zéro : le TPM ne protégerait rien) ; `--allow-zero-pcrs` pour forcer. PCR enregistrés à l'enrôlement pour dire ensuite lequel a changé.
+- **Passphrase de secours : 12 caractères au moins**, jamais dans les arguments (fichier en mode 600 ou saisie au terminal), vérifiée avant et après chaque enrôlement ; un volume sans passphrase est refusé, et `verify` affiche « DANGER » si elle a disparu. Pas de PIN TPM : la machine intègre démarre sans rien taper.
+- **Un seul enrôlement TPM par volume** : chaque `enroll-tpm` / `reseal` remplace l'ancien (`--wipe-slot=tpm2`).
+- **Options des volumes** : `discard` (TRIM du SSD ; révèle seulement quels blocs sont libres), `no-read-workqueue,no-write-workqueue` (latence plus basse sur NVMe), aussi gardées dans l'en-tête LUKS.
+- **Ligne de commande par `/etc/rago/kernel.conf` de M0** : `root=` dans `RAGO_CMDLINE`, `resume=` dans `RAGO_CMDLINE_EXTRA` (code de M0 inchangé).
+- **Swap chiffré en priorité 10**, sous le zram de [[M1 Tuning hôte]] (priorité 100) : zram d'abord, le disque sert à l'hibernation.
+- **Contrôle `rago-tpm-check` une minute après le démarrage** (minuterie, ne retarde pas le démarrage) : écrit `/run/rago/encryption-status` pour [[M11 Rago UI]] et le journal ; ne change rien tout seul (le `reseal` reste une commande du joueur).
 
 ## Abandonné
 - **VM gaming (passthrough/Looking Glass)** — 12/11, remplacé par le Fast OS Switch. Ne pas relancer.
