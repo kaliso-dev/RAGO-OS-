@@ -1,0 +1,90 @@
+LUKS header information
+Version:       	2
+Epoch:         	9
+Metadata area: 	16384 [bytes]
+Keyslots area: 	16744448 [bytes]
+UUID:          	cbf571aa-d93b-4297-a358-57e2dce502b3
+Label:         	(no label)
+Subsystem:     	(no subsystem)
+Flags:       	(no flags)
+
+Data segments:
+  0: crypt
+	offset: 16777216 [bytes]
+	length: (whole device)
+	cipher: aes-xts-plain64
+	sector: 4096 [bytes]
+
+Keyslots:
+  0: luks2
+	Key:        512 bits
+	Priority:   normal
+	Cipher:     aes-xts-plain64
+	Cipher key: 512 bits
+	PBKDF:      argon2id
+	Time cost:  15
+	Memory:     65536
+	Threads:    4
+	Salt:       78 f9 c7 56 8b 99 17 2c d9 d1 45 9d 5a 9e 66 d5 
+	            cf 6a 96 17 28 4b 0a e3 cc ca 21 52 ee 2b 0d c2 
+	AF stripes: 4000
+	AF hash:    sha512
+	Area offset:32768 [bytes]
+	Area length:258048 [bytes]
+	Digest ID:  0
+  2: luks2
+	Key:        512 bits
+	Priority:   normal
+	Cipher:     aes-xts-plain64
+	Cipher key: 512 bits
+	PBKDF:      pbkdf2
+	Hash:       sha512
+	Iterations: 1000
+	Salt:       d2 92 8a da 88 f6 86 9d 6f 3e a5 79 2c 5f 47 6e 
+	            94 b0 f8 d6 4b d4 9a 76 e7 94 9f 9d b5 7b d0 88 
+	AF stripes: 4000
+	AF hash:    sha512
+	Area offset:548864 [bytes]
+	Area length:258048 [bytes]
+	Digest ID:  0
+Tokens:
+  1: systemd-tpm2
+	tpm2-hash-pcrs:   0+7
+	tpm2-pcr-bank:    sha256
+	tpm2-pubkey:
+	            (null)
+	tpm2-pubkey-pcrs: 
+	tpm2-primary-alg: ecc
+	tpm2-blob:        00 9e 00 20 62 f7 e7 0a 72 c1 d7 05 2f 26 44 05
+	            c6 14 66 ba 06 6c 82 4c 72 6d dd de 14 6d 74 f5
+	            68 aa 09 d1 00 10 bf 14 ca b2 b7 cd c5 42 c2 76
+	            79 fc 4b 63 03 3a e3 70 f7 38 d5 f9 95 b5 5c 7e
+	            89 c0 7b ee 75 82 47 fa ad 99 cc 5b f5 98 1b c2
+	            29 11 f4 d9 43 5f 5b 10 11 81 75 21 0c 9a 26 75
+	            4d 0e ca 90 86 c4 e6 63 b9 f7 67 4b 88 10 c7 61
+	            3f 97 ab 63 5b da e8 45 58 aa 04 f1 a1 51 15 3d
+	            ff d8 90 71 55 84 63 22 f0 a5 c3 b4 bc 1a 00 47
+	            1f f5 52 1b c9 85 bb c6 0c 27 4a bd 69 39 b8 05
+	            00 4e 00 08 00 0b 00 00 00 12 00 20 a0 7f 7f 4d
+	            8b 61 46 41 c6 77 8a 76 a5 ba 20 6b ea 11 39 83
+	            5a 55 7b db 3a dc e1 63 ca 00 bd ff 00 10 00 20
+	            b1 81 c7 75 95 ef 1d c2 9c d7 6d b0 bb 25 be 61
+	            73 0c b9 30 98 6b 1f 4e 93 e8 eb 67 45 27 64 d8
+	tpm2-policy-hash:
+	            a0 7f 7f 4d 8b 61 46 41 c6 77 8a 76 a5 ba 20 6b
+	            ea 11 39 83 5a 55 7b db 3a dc e1 63 ca 00 bd ff
+	tpm2-pin:         false
+	tpm2-pcrlock:     false
+	tpm2-salt:        false
+	tpm2-srk:         true
+	Keyslot:    2
+Digests:
+  0: pbkdf2
+	Hash:       sha512
+	Iterations: 234896
+	Salt:       bc 18 3b 70 9c 66 d8 e5 a7 d1 44 4f a6 f9 93 c3 
+	            a8 35 25 7e 1d f8 54 22 d9 fb 2f 8a b1 19 0d f1 
+	Digest:     dd 78 90 f3 bc 2c 5c 9f 45 57 5d a5 57 1b 98 c6 
+	            7a 2d d5 ee b6 27 ee 94 40 65 69 4a 3b 6b da 9b 
+	            04 56 80 bd d6 f2 08 5e 48 d6 aa 04 c9 04 bb 36 
+	            aa 93 0a 9c 6f 7a e9 27 d6 f7 f9 8e c4 a7 bd b0 

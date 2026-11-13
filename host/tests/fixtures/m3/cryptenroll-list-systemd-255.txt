@@ -1,0 +1,3 @@
+SLOT TYPE
+   0 password
+   2 tpm2
