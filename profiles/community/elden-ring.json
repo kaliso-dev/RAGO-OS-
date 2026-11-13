@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "elden-ring",
+  "name": "Elden Ring",
+  "couche": "proton",
+  "anticheat": "Easy Anti-Cheat",
+  "verified": false,
+  "notes": "Exemple au format JSON. Valeurs de départ à mesurer : pas encore vérifié sur matériel.",
+  "match": {
+    "steam_appid": [
+      1245620
+    ],
+    "exe": [
+      "eldenring.exe"
+    ]
+  },
+  "cpu_governor": "performance",
+  "thp": "madvise",
+  "cstates": "deep",
+  "mitigations": "on",
+  "sched_hint": {
+    "confine": "auto"
+  }
+}

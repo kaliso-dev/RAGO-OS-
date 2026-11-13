@@ -1,0 +1,23 @@
+# Rago OS — profil de jeu (M14). Format : profiles/README.md
+# Valeurs de départ à mesurer (1 % low MangoHud) : PAS encore vérifié sur matériel.
+schema = 1
+id = "cyberpunk-2077"
+name = "Cyberpunk 2077"
+couche = "proton"
+anticheat = "aucun"
+verified = false
+notes = "Jeu lourd en mémoire : THP always à comparer à madvise (base M1) sur la vraie machine."
+
+cpu_governor = "performance"
+thp = "always"
+mitigations = "on"
+
+[match]
+steam_appid = [1091500]
+exe = ["Cyberpunk2077.exe"]
+
+[sched_hint]
+confine = "auto"
+
+[gpu_clocks]
+mode = "max"

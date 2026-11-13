@@ -1,0 +1,21 @@
+# Rago OS — profil de jeu (M14). Format : profiles/README.md
+# Valeurs de départ à mesurer : PAS encore vérifié sur matériel.
+schema = 1
+id = "counter-strike-2"
+name = "Counter-Strike 2"
+couche = "proton"            # binaire Linux natif : couche 1 (jeu natif)
+anticheat = "VAC"
+verified = false
+notes = "Compétitif, sensible à la latence d'entrée : C-states shallow (C1 max) pendant le jeu."
+
+cpu_governor = "performance"
+thp = "madvise"
+cstates = "shallow"
+mitigations = "on"
+
+[match]
+steam_appid = [730]
+exe = ["cs2"]
+
+[sched_hint]
+confine = "auto"
