@@ -22,3 +22,8 @@ Retour à [[Projet]]. Règle : en cas de doute, ne jamais deviner — écrire la
 | Base Rago (Arch) : tuned ≥ 2.23 (profils dans `/etc/tuned/profiles`), paquets `tuned`, `irqbalance`, `zram-generator` présents ? Testé seulement sur Ubuntu 24.04 (tuned 2.21) en VM | À VÉRIFIER ([[M1 Tuning hôte]]) |
 | Gouverneur `performance` réellement appliqué par tuned avec amd-pstate / intel_pstate actif (pas de cpufreq en VM) | À VÉRIFIER ([[M1 Tuning hôte]]) |
 | Processeur de la machine de test (X3D, Intel hybride ou symétrique) : décide quel routage M0 peut être vérifié | À VÉRIFIER ([[Prérequis matériel]]) |
+| Valeurs des 5 profils communautaires (THP always pour Cyberpunk, C-states shallow pour CS2, perf pour Fortnite…) : à mesurer (1 % low) avant `verified = true` | À VÉRIFIER ([[M14 Profils par jeu]]) |
+| gamemode (M2) change aussi le gouverneur au lancement : le désactiver côté gouverneur pour que rago-profiled reste seul maître ? | À DÉCIDER ([[M2 Couche Proton]], [[M14 Profils par jeu]]) |
+| Base communautaire en ligne (partage façon ProtonDB, mise à jour hors ISO) : format, serveur, modération | À DÉCIDER ([[M14 Profils par jeu]]) |
+| Droits du service rago-profiled pour les hooks à venir : capacités pour M9 (nvidia-smi / sysfs AMD), `ReadWritePaths=` vers RAGO-COMM pour M6 | À VÉRIFIER ([[M9 GPU]], [[M6 Fast OS Switch]]) |
+| Gouverneur appliqué par rago-profiled avec amd-pstate / intel_pstate actif (pas de cpufreq en VM) | À VÉRIFIER ([[M14 Profils par jeu]]) |
