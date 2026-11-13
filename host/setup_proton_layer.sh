@@ -403,6 +403,7 @@ step_lock() {
 }
 
 # Fichier épinglé vérifié : depuis --*-file, le cache, ou téléchargé. Chemin sur la sortie.
+# Codes : 2 = absent du lock, 3 = PENDING, 4 = téléchargement impossible, 5 = empreinte fausse.
 fetch_pinned() { # fetch_pinned <nom> <fichier local ou vide>
 	local name=$1 local_file=$2 ver url hash f
 	read -r ver url hash < <(rago_pl_lock_get "$LOCK" "$name") || return 2
@@ -419,7 +420,10 @@ fetch_pinned() { # fetch_pinned <nom> <fichier local ou vide>
 			mv -f "$f.part" "$f"
 		fi
 	fi
-	rago_pl_hash_ok "$f" "$hash" || die "$name : empreinte différente de sources.lock ($f) — fichier refusé"
+	if ! rago_pl_hash_ok "$f" "$hash"; then
+		printf '\033[1;31mERREUR :\033[0m %s : empreinte différente de sources.lock (%s) — fichier refusé\n' "$name" "$f" >&2
+		return 5
+	fi
 	echo "$f"
 }
 
@@ -467,6 +471,7 @@ install_proton_ge() {
 	case "$rc" in
 	0) ;;
 	3) warn "Proton-GE pas encore épinglé dans host/proton/sources.lock (PENDING) : sauté. Un mainteneur avec accès GitHub : $0 lock"; return 0 ;;
+	5) die "Proton-GE refusé (empreinte) : rien installé" ;;
 	*) warn "Proton-GE : téléchargement impossible (code $rc) : sauté ; relancer install avec le réseau, ou --proton-ge-file"; return 0 ;;
 	esac
 	if [ -e "$dst" ] && [ ! -f "$dst/$GE_MARK" ]; then
@@ -500,6 +505,7 @@ install_heroic() {
 	case "$rc" in
 	0) ;;
 	3) warn "Heroic pas encore épinglé dans host/proton/sources.lock (PENDING) : sauté. Un mainteneur avec accès GitHub : $0 lock"; return 0 ;;
+	5) die "Heroic refusé (empreinte) : rien installé" ;;
 	*) warn "Heroic : téléchargement impossible (code $rc) : sauté"; return 0 ;;
 	esac
 	log "installation de Heroic ($f)"
