@@ -520,6 +520,44 @@ rago_cmdline_drop_key() {
 	echo "${out# }"
 }
 
+# --- système démarré (verify) ----------------------------------------------------
+# Verdict d'un contrôle du système en marche (swap actif, resume réglé) :
+#   rago_live_verdict <bon 0|1> <nouvelle ligne de commande pas encore active 0|1>
+#   -> ok | boot (normal avant le redémarrage) | bad
+rago_live_verdict() {
+	if [ "$1" = 1 ]; then
+		echo ok
+	elif [ "$2" = 1 ]; then
+		echo boot
+	else
+		echo bad
+	fi
+}
+
+# Hibernation possible avec le noyau en marche ? Le noyau n'écrit « disk » dans
+# /sys/power/state que si elle l'est (ni nohibernate, ni verrouillage lockdown…).
+#   rago_hibernation_available <contenu de /sys/power/state>
+rago_hibernation_available() {
+	local w
+	for w in $1; do
+		[ "$w" = disk ] && return 0
+	done
+	return 1
+}
+
+# Mode du verrouillage du noyau, lu dans /sys/kernel/security/lockdown
+# (« none [integrity] confidentiality ») : none | integrity | confidentiality.
+#   rago_lockdown_mode <contenu>
+rago_lockdown_mode() {
+	local w
+	for w in $1; do
+		case "$w" in
+		\[*\]) w=${w#\[}; echo "${w%\]}"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
 # --- disques : virtuel ou réel ? -------------------------------------------------
 # Le périphérique (dossier /sys/class/block/<nom>) est-il un disque virtuel ?
 # loop, nbd, virtio, zram, disques QEMU (SATA / NVMe émulés). Une partition est

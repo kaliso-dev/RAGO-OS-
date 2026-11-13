@@ -475,6 +475,15 @@ read_pcrs() {
 	TPM2TOOLS_TCTI=$(tpm_tcti) tpm2_pcrread "sha256:$(rago_pcrs_comma "$PCRS")" 2>/dev/null | rago_pcrread_parse
 }
 
+# Dans un chroot (installateur M12) ? La racine vue ici n'est pas celle de PID 1.
+# Sans droit de lire /proc/1/root (pas root) : réponse « non ».
+in_chroot() {
+	local me init
+	me=$(stat -Lc %d:%i / 2>/dev/null) || return 1
+	init=$(stat -Lc %d:%i "$PROC/1/root/." 2>/dev/null) || return 1
+	[ "$me" != "$init" ]
+}
+
 secure_boot_state() { # -> on | off | ?
 	local f="$SYS/firmware/efi/efivars/SecureBoot-$EFI_GLOBAL" b
 	[ -r "$f" ] || { echo "?"; return 0; }
@@ -1274,7 +1283,7 @@ verify_cmdline() {
 }
 
 verify_live() {
-	local src name slave u swapdev res mm
+	local src name slave u swapdev res mm pend good lock
 	src=$(findmnt -no SOURCE / 2>/dev/null || true)
 	name=$(basename "$(readlink -f "$src" 2>/dev/null)")
 	slave=$(first_slave "$name")
@@ -1282,16 +1291,37 @@ verify_live() {
 	[ -z "$slave" ] || u=$(luks_uuid "/dev/$slave")
 	if [ -n "$u" ] && [ "$u" = "$(this_root_uuid)" ]; then ok "racine : $src sur le volume chiffré du slot ${SLOT:-a}"; else ko "racine : $src n'est pas le volume chiffré du slot ${SLOT:-a}"; fi
 	[ -n "$SWAP_UUID" ] || return 0
+	# Nouvelle ligne de commande pas encore active (install juste fait) : swap et
+	# resume arrivent au redémarrage, ce n'est pas un échec.
+	pend=0
+	rago_cmdline_has "$(cat "$PROC/cmdline" 2>/dev/null || true)" "resume=/dev/mapper/$RAGO_MAP_SWAP" || pend=1
 	swapdev=$(readlink -f "/dev/mapper/$RAGO_MAP_SWAP" 2>/dev/null || true)
-	if [ -n "$swapdev" ] && awk 'NR > 1 { print $1 }' "$PROC/swaps" | xargs -r readlink -f | grep -qx "$swapdev"; then
-		ok "swap chiffré actif ($swapdev)"
-	else
-		ko "swap chiffré /dev/mapper/$RAGO_MAP_SWAP pas actif"
+	good=0
+	if [ -n "$swapdev" ] && awk 'NR > 1 { print $1 }' "$PROC/swaps" | xargs -r readlink -f | grep -qx "$swapdev"; then good=1; fi
+	case "$(rago_live_verdict "$good" "$pend")" in
+	ok) ok "swap chiffré actif ($swapdev)" ;;
+	boot) boot "swap chiffré /dev/mapper/$RAGO_MAP_SWAP : actif après le redémarrage" ;;
+	*) ko "swap chiffré /dev/mapper/$RAGO_MAP_SWAP pas actif" ;;
+	esac
+	if ! rago_hibernation_available "$(cat "$SYS/power/state" 2>/dev/null || true)"; then
+		lock=$(rago_lockdown_mode "$(cat "$SYS/kernel/security/lockdown" 2>/dev/null || true)" || true)
+		case "$lock" in
+		integrity | confidentiality)
+			att "hibernation impossible : noyau verrouillé (lockdown $lock, imposé sous Secure Boot par certains noyaux de distribution) ; le Fast OS Switch (M6) en a besoin" ;;
+		*) att "hibernation impossible avec ce noyau (« disk » absent de $SYS/power/state : nohibernate ?) ; le Fast OS Switch (M6) en a besoin" ;;
+		esac
+		return 0
 	fi
 	res=$(cat "$SYS/power/resume" 2>/dev/null || true)
 	mm=""
 	[ -z "$swapdev" ] || mm=$(cat "$SYS/class/block/$(basename "$swapdev")/dev" 2>/dev/null || true)
-	if [ -n "$mm" ] && [ "$res" = "$mm" ]; then ok "hibernation : resume depuis le swap chiffré ($res)"; else att "hibernation : /sys/power/resume = ${res:-?} (swap chiffré : ${mm:-?})"; fi
+	good=0
+	if [ -n "$mm" ] && [ "$res" = "$mm" ]; then good=1; fi
+	case "$(rago_live_verdict "$good" "$pend")" in
+	ok) ok "hibernation : resume depuis le swap chiffré ($res)" ;;
+	boot) boot "hibernation : resume vers le swap chiffré après le redémarrage" ;;
+	*) att "hibernation : /sys/power/resume = ${res:-?} (swap chiffré : ${mm:-?})" ;;
+	esac
 	awk 'NR > 1 { print $1 }' "$PROC/swaps" | while read -r s; do
 		case "$s" in /dev/zram* | /dev/dm-* | /dev/mapper/*) ;; *) echo "$s" ;; esac
 	done | while read -r s; do att "swap NON chiffré actif : $s (la mémoire y est écrite en clair)"; done
@@ -1333,7 +1363,12 @@ step_verify() {
 	verify_cmdline
 	verify_pcrs
 	if [ -z "$R" ]; then
-		verify_live
+		# Dans le chroot de l'installateur, le nouveau système n'a pas encore démarré.
+		if in_chroot; then
+			skip "dans un chroot (installateur) : racine, swap et hibernation se vérifient au premier démarrage (sudo rago-encryption verify)"
+		else
+			verify_live
+		fi
 		cpu_report ok att
 		case "$(secure_boot_state)" in
 		on) ok "Secure Boot actif" ;;

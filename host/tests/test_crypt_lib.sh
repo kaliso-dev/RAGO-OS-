@@ -136,6 +136,15 @@ sed -e 's/^Label:.*/Label:          \trago-a/' -e 's/tpm2-hash-pcrs:/tpm2-pcrs:/
 sum2=$(rago_luks_summary < "$tmp/dump2")
 check "luksDump : étiquette" "label rago-a" "$(grep '^label' <<<"$sum2")"
 check "luksDump : tpm2-pcrs (ancien)" "token 1 systemd-tpm2 2 0+7" "$(grep '^token' <<<"$sum2")"
+# cryptsetup 2.8.4 + systemd 259 (VM du test M3, après format + enroll-tpm) : autre ordre des
+# champs du jeton (tpm2-policy-hash avant tpm2-blob), tpm2-pcrlock-nv, drapeaux persistants.
+sum3=$(rago_luks_summary < "$fx/luksdump-cryptsetup-2.8-tpm2.txt")
+check "luksDump 2.8 : étiquette de format" "label rago-a" "$(grep '^label' <<<"$sum3")"
+check "luksDump 2.8 : chiffrement" "cipher aes-xts-plain64" "$(grep '^cipher' <<<"$sum3")"
+check "luksDump 2.8 : passphrase argon2id" "keyslot 0 512 argon2id sha512" "$(grep '^keyslot 0' <<<"$sum3")"
+check "luksDump 2.8 : emplacement TPM" "keyslot 1 512 pbkdf2 sha512" "$(grep '^keyslot 1' <<<"$sum3")"
+check "luksDump 2.8 : jeton TPM2 PCR 0+7" "token 0 systemd-tpm2 1 0+7" "$(grep '^token' <<<"$sum3")"
+check "luksDump 2.8 : hash du condensé" "digest-hash sha512" "$(grep '^digest-hash' <<<"$sum3")"
 
 slots=$(rago_enroll_list_parse < "$fx/cryptenroll-list-systemd-255.txt")
 check "cryptenroll : liste" "0 password
@@ -144,6 +153,9 @@ check "cryptenroll : 1 passphrase" 1 "$(rago_slots_count "$slots" password)"
 check "cryptenroll : 1 TPM" 1 "$(rago_slots_count "$slots" tpm2)"
 check "cryptenroll : 0 recovery" 0 "$(rago_slots_count "$slots" recovery)"
 check "cryptenroll : liste vide" 0 "$(rago_slots_count "" password)"
+slots259=$(rago_enroll_list_parse < "$fx/cryptenroll-list-systemd-259.txt")
+check "cryptenroll 259 : liste" "0 password
+1 tpm2" "$slots259"
 list3=$(printf 'SLOT TYPE    \n   1 tpm2\n   4 recovery\n' | rago_enroll_list_parse)
 check "cryptenroll : TPM seul -> 0 passphrase" 0 "$(rago_slots_count "$list3" password)"
 
@@ -308,6 +320,21 @@ check_rc "valeur absente" 1 rago_cmdline_value "quiet" root
 check "valeur vide" "" "$(rago_cmdline_value "resume= quiet" resume)"
 check "retrait root=" "quiet rw splash" "$(rago_cmdline_drop_key "root=UUID=x quiet rw root=/dev/y splash" root)"
 check "retrait : ne touche pas rootflags=" "rootflags=subvol=@ quiet" "$(rago_cmdline_drop_key "root=x rootflags=subvol=@ quiet" root)"
+
+# --- système démarré (verify) ----------------------------------------------------------
+check "verdict : bon" ok "$(rago_live_verdict 1 0)"
+check "verdict : bon (même si ligne en attente)" ok "$(rago_live_verdict 1 1)"
+check "verdict : pas encore, redémarrage en attente" boot "$(rago_live_verdict 0 1)"
+check "verdict : mauvais" bad "$(rago_live_verdict 0 0)"
+check_rc "hibernation possible (disk listé)" 0 rago_hibernation_available "freeze mem disk"
+check_rc "hibernation possible (disk seul)" 0 rago_hibernation_available "disk"
+check_rc "hibernation impossible (noyau verrouillé : pas de disk)" 1 rago_hibernation_available "freeze mem"
+check_rc "hibernation impossible (fichier vide)" 1 rago_hibernation_available ""
+check_rc "hibernation : « diskless » n'est pas « disk »" 1 rago_hibernation_available "freeze diskless"
+check "lockdown : none" none "$(rago_lockdown_mode "[none] integrity confidentiality")"
+check "lockdown : integrity (Secure Boot, noyau Ubuntu)" integrity "$(rago_lockdown_mode "none [integrity] confidentiality")"
+check "lockdown : confidentiality" confidentiality "$(rago_lockdown_mode "none integrity [confidentiality]")"
+check_rc "lockdown : illisible" 1 rago_lockdown_mode ""
 
 # --- disque virtuel ou réel ? ------------------------------------------------------------
 S="$tmp/sys"
