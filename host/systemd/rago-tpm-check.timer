@@ -1,0 +1,13 @@
+# Rago OS — contrôle du TPM une minute après le démarrage (module M3).
+# Minuterie plutôt que service au démarrage : le contrôle (un descellement TPM
+# par volume) ne retarde ni la session ni le cold boot du Fast OS Switch.
+[Unit]
+Description=Rago OS : contrôle du déverrouillage TPM après le démarrage (M3)
+ConditionPathExists=/etc/rago/encryption.conf
+
+[Timer]
+OnBootSec=1min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

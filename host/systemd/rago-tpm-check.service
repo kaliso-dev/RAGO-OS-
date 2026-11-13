@@ -1,0 +1,18 @@
+# Rago OS — le TPM déverrouille-t-il encore les volumes chiffrés ? (module M3)
+# Après une mise à jour du BIOS / UEFI ou un changement de Secure Boot, les PCR
+# 0 / 7 changent : le TPM refuse et la passphrase de secours a été demandée.
+# Ce contrôle l'écrit dans /run/rago/encryption-status (pour l'interface, M11)
+# et dans le journal, avec la commande à lancer : sudo rago-encryption reseal.
+[Unit]
+Description=Rago OS : contrôle du déverrouillage TPM des volumes chiffrés (M3)
+Documentation=file:/usr/lib/rago/setup_secure_encryption.sh
+ConditionPathExists=/etc/rago/encryption.conf
+After=cryptsetup.target local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rago-encryption tpm-check
+# 0 = TPM bon, 1 = TPM refuse (signalé), 4 = pas enrôlé : rien n'est en échec.
+SuccessExitStatus=1 4
+Nice=10
+IOSchedulingClass=idle
