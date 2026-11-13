@@ -50,6 +50,6 @@ statut: EN COURS
 4. Mesurer avant de passer un profil à `verified = true` : 1 % low MangoHud, même scène, profil contre base (`host/tests/m1_frametime_compare.sh`).
 5. Côté switch (quand M5/M6 existeront) : `rago-profiled prepare-switch --id valorant` puis VBS/HVCI vérifiés dans le micro-Windows.
 
-**Dépend de / relié à :** [[M1 Tuning hôte]] (la base), [[M0 Noyau scx_rago]] (hint, groupe rago, mitigations), [[M2 Couche Proton]] (appellera `launch`), [[M5 Micro-Windows]] et [[M6 Fast OS Switch]] (hook `windows-security`), [[M9 GPU]] (hook `gpu-clocks`), [[M11 Rago UI]] (`launch`, `prepare-switch`, `show`/`list` pour l'écran des profils), [[M13 Build ISO]] (doit installer binaire, service et `profiles/community/`).
+**Dépend de / relié à :** [[M1 Tuning hôte]] (la base), [[M0 Noyau scx_rago]] (hint, groupe rago, mitigations), [[M2 Couche Proton]] (appelle `launch` depuis le hook `rago-launch`, 13/11), [[M5 Micro-Windows]] et [[M6 Fast OS Switch]] (hook `windows-security`), [[M9 GPU]] (hook `gpu-clocks`), [[M11 Rago UI]] (`launch`, `prepare-switch`, `show`/`list` pour l'écran des profils), [[M13 Build ISO]] (doit installer binaire, service et `profiles/community/`).
 
 **Prompt complet** : `docs/plan/Rago_Prompts_Sequence.md` (M14). Détail : bible v7, module M14.

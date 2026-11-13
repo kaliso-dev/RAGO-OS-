@@ -17,6 +17,8 @@ Chaque décision de Sofiene, datée. Retour à [[Projet]]. La plus récente prim
 
 - **13/11 — M14 ensuite, et lui seul.** « Prochain module : M14. […] développe le Module M14, et lui seul » ; « les horloges GPU (M9) et le profil de sécurité Windows (M5) ne sont pas encore codés → câble-les comme des hooks/stubs clairs, à activer quand M9/M5 existeront » ; « Cohérent avec M1 (M1 = réglage de base, M14 = surcharge par jeu) ». Voir [[M14 Profils par jeu]].
 
+- **13/11 — M2 ensuite, et lui seul.** « Prochain module : M2 » ; « développe le Module M2, et lui seul » ; « Hook de lancement : au démarrage d'un jeu, applique son profil via rago-profiled (M14) et appelle le hint scheduler via rago-sched-hint (M0). Cohérent avec M1 (base) et M14 (surcharge par jeu) » ; « Teste ce qui est testable sans matériel […] ; marque clairement les parties affichage/VRR/HDR/FPS comme « en attente de matériel » ». Voir [[M2 Couche Proton]].
+
 ## Choix techniques de Claude (M0, 12/11) — à valider par Sofiene
 Ce ne sont pas des décisions de Sofiene : choix d'implémentation faits pendant M0, modifiables.
 - **Noyau 6.18 LTS** comme base (≥ 6.12 demandé ; LTS = correctifs longtemps). Version exacte épinglée dans `kernel/patches/sources.lock`.
@@ -47,6 +49,16 @@ Ce ne sont pas des décisions de Sofiene : choix d'implémentation faits pendant
 - **Hooks** `/usr/lib/rago/hooks/gpu-clocks` (M9) et `windows-security` (M5/M6) : exécutables root, environnement vidé, 15 s max ; absent = « en attente ».
 - **Base communautaire = fichiers du dépôt** (`profiles/community/`, installés dans `/usr/share/rago/profiles/`), surchargés par `/etc/rago/profiles/`. Pas de synchronisation en ligne pour l'instant. Formats TOML **et** JSON acceptés.
 - **Jeu de couche switch lancé par `launch`** : avertissement, aucun réglage Linux, le jeu est lancé quand même.
+
+## Choix techniques de Claude (M2, 13/11) — à valider par Sofiene
+- **Hook = `rago-launch %command%`** (et non `rago-profiled launch` directement) : il ajoute caches de shaders, gamemode, MangoHud et runtimes EAC/BattlEye hors Steam, puis passe par `rago-profiled launch` (M14) qui passe par `rago-sched-hint run` (M0). Chaque maillon absent est sauté, le jeu se lance toujours.
+- **Steam n'a pas d'option de lancement globale** : `rago-steam-config` écrit le hook dans chaque jeu installé, **seulement Steam fermé** (il réécrit sa config en quittant), en gardant l'option du joueur ; un jeu dont le joueur retire le hook n'est plus touché. La session Rago le refait avant chaque démarrage de Steam.
+- **gamemode réduit** : pas de gouverneur (M14/M1), pas d'épinglage / parking des cœurs (M0), pas de renice ni temps réel (M0), pas de split lock (M1), pas de GPU (M9). Règle polkit `40-rago-gamemode.rules` qui refuse ses 4 assistants (passe avant `gamemode.rules` du paquet ; prouvé avec un vrai polkitd). Réponse de Claude à la question « gamemode change aussi le gouverneur ».
+- **Proton-GE installé pour tout le système** (`/usr/share/steam/compatibilitytools.d/`), épinglé par empreinte, mis par défaut **seulement si le joueur n'a rien choisi** ; `--default-proton keep` pour ne rien toucher.
+- **Cache de shaders par GPU** (`<pilote>-<vendor>-<device>`) **et par jeu**, sous `~/.local/share/rago/shader-cache` ; seules les variables que Steam / Proton n'ont pas posées sont ajoutées (le cache de Steam reste maître pour ses jeux).
+- **Pré-chauffage** : `fossilize-replay` en priorité basse, en fond (`background`, défaut), pause pendant les jeux, tampon par base, tout refait si le pilote Vulkan change ; `before` (avant le jeu) et `off` en option.
+- **HUD** : dans la session gamescope, mangoapp (réglable depuis Steam) ; hors session, MangoHud par jeu ; jamais les deux. `/etc/MangoHud.conf` compact (FPS, 1 % low, temps d'image), Shift droit + F12 pour cacher.
+- **Session** : VRR, HDR, tearing en jeu, `--rt` activés par défaut (gamescope reçoit `cap_sys_nice`), mode natif de l'écran ; tout se coupe dans `/etc/rago/proton-layer.conf`.
 
 ## Abandonné
 - **VM gaming (passthrough/Looking Glass)** — 12/11, remplacé par le Fast OS Switch. Ne pas relancer.
