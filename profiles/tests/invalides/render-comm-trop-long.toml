@@ -1,0 +1,6 @@
+id = "render-comm-trop-long"
+schema = 1
+name = "X"
+couche = "proton"
+[sched_hint]
+render_comm = ["RHISubmissionThread"]

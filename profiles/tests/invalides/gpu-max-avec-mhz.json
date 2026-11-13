@@ -1,0 +1,1 @@
+{"schema": 1, "id": "gpu-max-avec-mhz", "name": "X", "couche": "proton", "gpu_clocks": {"mode": "max", "core_mhz": 2000}}

@@ -1,0 +1,6 @@
+id = "appid-zero"
+schema = 1
+name = "X"
+couche = "proton"
+[match]
+steam_appid = [0]
