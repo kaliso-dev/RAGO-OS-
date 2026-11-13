@@ -1,0 +1,14 @@
+# Rago OS — profil de jeu (M14). Format : profiles/README.md
+# Couche switch : le jeu tourne dans le micro-Windows (M5), lancé par le Fast OS Switch (M6).
+schema = 1
+id = "valorant"
+name = "VALORANT"
+couche = "switch"
+anticheat = "Riot Vanguard"
+verified = false
+notes = "Vanguard ne tourne pas sous Proton. compat_max : VBS / HVCI / IOMMU activés dans le micro-Windows (voir Vanguard On-Demand)."
+
+windows_security = "compat_max"
+
+[match]
+exe = ["VALORANT-Win64-Shipping.exe"]

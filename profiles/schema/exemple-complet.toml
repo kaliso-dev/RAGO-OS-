@@ -1,0 +1,35 @@
+# Rago OS — profil de jeu (M14) : MODÈLE avec tous les champs, commentés.
+# Copier en /etc/rago/profiles/<id>.toml (réglage local) ou proposer dans
+# profiles/community/ (base communautaire). Vérifier : rago-profiled validate <fichier>
+# Règle d'or : un champ absent = garder le réglage de base de la machine (M1).
+
+schema = 1                      # version du format (obligatoire)
+id = "exemple-complet"          # = nom du fichier sans extension ; a-z 0-9 -
+name = "Exemple complet"        # nom affiché
+couche = "proton"               # proton (jeu natif Linux) | switch (micro-Windows, M5/M6)
+anticheat = "aucun"             # information seulement
+verified = false                # true seulement après un vrai test sur matériel
+notes = "Ce que ce profil change et pourquoi (mesures 1 % low…)."
+
+# --- côté Linux (couche proton seulement) -------------------------------------
+cpu_governor = "performance"    # gouverneur cpufreq pendant le jeu
+thp = "always"                  # madvise (base M1) | always
+cstates = "shallow"             # deep | shallow (C1 max) | poll — ne peut qu'ajouter une limite à M1
+mitigations = "on"              # on | off — VÉRIFIÉ et signalé, jamais changé (réglage noyau M0)
+
+# --- côté switch (couche switch seulement) ------------------------------------
+# windows_security = "compat_max"   # compat_max (VBS/HVCI/IOMMU, défaut sûr) | perf (VBS/HVCI off)
+
+[match]                          # comment reconnaître le jeu sans son id
+steam_appid = [123456]          # AppID Steam (variable SteamAppId posée par Steam)
+exe = ["ExempleJeu.exe"]        # nom de l'exécutable, sans chemin, casse ignorée
+
+[sched_hint]                     # hint vers scx_rago (M0) via rago-sched-hint run
+enabled = true                  # false : jeu lancé sans tag
+confine = "auto"                # auto (X3D : oui) | on | off
+render_comm = ["GameThread"]    # préfixes de threads de rendu en plus des motifs de scx_rago (8 max, 15 caractères)
+
+[gpu_clocks]                     # horloges GPU (M9, hook gpu-clocks)
+mode = "fixed"                  # auto (pas de surcharge) | max | fixed
+core_mhz = 1800                 # avec fixed seulement (100..5000)
+mem_mhz = 7000                  # avec fixed seulement (100..40000)

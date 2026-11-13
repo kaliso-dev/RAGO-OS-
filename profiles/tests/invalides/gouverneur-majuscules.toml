@@ -1,0 +1,5 @@
+id = "gouverneur-majuscules"
+schema = 1
+name = "X"
+couche = "proton"
+cpu_governor = "Performance"

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kaliso-dev/RAGO-OS-/profiles/schema/rago-profile.schema.json",
+  "title": "Profil de jeu Rago OS (M14), schéma 1",
+  "description": "Surcharge par jeu du réglage de base (M1). Un champ absent = garder la base. Même format en TOML (<id>.toml) et en JSON (<id>.json). Référence : profiles/README.md. Le démon rago-profiled applique en plus deux règles que ce schéma ne peut pas exprimer : l'id doit égaler le nom du fichier, et un critère match (steam_appid, exe) appartient au premier profil qui le revendique.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "name", "couche"],
+  "properties": {
+    "schema": { "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+      "description": "Identifiant Rago du jeu = nom du fichier sans extension."
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S" },
+    "couche": {
+      "enum": ["proton", "switch"],
+      "description": "proton : jeu natif sous Linux. switch : micro-Windows via le Fast OS Switch (M5/M6)."
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "steam_appid": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+        },
+        "exe": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^/\\\\]+$" },
+          "description": "Nom de l'exécutable sans chemin, comparé sans tenir compte de la casse."
+        }
+      }
+    },
+    "cpu_governor": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]{1,15}$",
+      "description": "Gouverneur cpufreq pendant le jeu (performance, powersave, schedutil…). Ignoré sur les politiques qui ne le proposent pas."
+    },
+    "thp": { "enum": ["madvise", "always"], "description": "Transparent hugepages pendant le jeu (base M1 : madvise)." },
+    "cstates": {
+      "enum": ["deep", "shallow", "poll"],
+      "description": "Même vocabulaire que --cstates de M1. Un profil ne peut qu'ajouter une limite (PM QoS) : deep ne relâche pas une base M1 plus stricte."
+    },
+    "sched_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Hint vers scx_rago (M0), passé à rago-sched-hint run.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "confine": { "enum": ["auto", "on", "off"], "default": "auto" },
+        "render_comm": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "pattern": "^[!-~]{1,15}$" },
+          "description": "Préfixes de noms de threads de rendu propres au jeu (en plus des motifs par défaut de scx_rago)."
+        }
+      }
+    },
+    "gpu_clocks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Horloges GPU, appliquées par M9 via le hook gpu-clocks (en attente tant que M9 n'existe pas).",
+      "properties": {
+        "mode": { "enum": ["auto", "max", "fixed"], "default": "auto" },
+        "core_mhz": { "type": "integer", "minimum": 100, "maximum": 5000 },
+        "mem_mhz": { "type": "integer", "minimum": 100, "maximum": 40000 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "fixed" } }, "required": ["mode"] },
+          "then": { "anyOf": [{ "required": ["core_mhz"] }, { "required": ["mem_mhz"] }] },
+          "else": { "not": { "anyOf": [{ "required": ["core_mhz"] }, { "required": ["mem_mhz"] }] } }
+        }
+      ]
+    },
+    "mitigations": {
+      "enum": ["on", "off"],
+      "description": "Souhait du profil. Réglage global du noyau (M0, RAGO_MITIGATIONS) : rago-profiled le vérifie et le signale, il ne le change jamais."
+    },
+    "windows_security": {
+      "enum": ["compat_max", "perf"],
+      "description": "Couche switch. compat_max : VBS/HVCI/IOMMU activés (défaut sûr). perf : VBS/HVCI coupés. Transmis à M5/M6 via le hook windows-security."
+    },
+    "anticheat": { "type": "string", "maxLength": 64, "description": "Information seulement." },
+    "verified": { "type": "boolean", "default": false, "description": "true seulement après un vrai test sur matériel." },
+    "notes": { "type": "string", "maxLength": 2000 }
+  }
+}

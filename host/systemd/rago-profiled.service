@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — démon des profils par jeu rago-profiled (module M14).
+#
+# Applique le profil d'un jeu (gouverneur, THP, C-states, horloges GPU via M9)
+# pendant qu'il tourne, par-dessus le réglage de base de M1, puis remet la
+# base. Socket /run/rago-profiled/profiled.sock (root:rago, 0660) : le joueur
+# doit être dans le groupe rago (déjà créé par M0, scx-install --user).
+#
+# Si le démon meurt en plein jeu, la photo de la base reste dans
+# /run/rago-profiled/applied.json (RuntimeDirectoryPreserve=yes) et il la
+# remet au redémarrage. Les C-states (PM QoS) tombent seuls à sa mort.
+#
+# Profils : /etc/rago/profiles (local), /usr/share/rago/profiles (communauté).
+# Hooks : /usr/lib/rago/hooks (gpu-clocks de M9, windows-security de M5/M6).
+
+[Unit]
+Description=Rago OS : profils par jeu (rago-profiled)
+Documentation=file:///usr/share/doc/rago/profiles/README.md
+# Après tuned : la base de M1 est posée avant le premier jeu.
+After=local-fs.target tuned.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rago-profiled daemon
+# SIGHUP : relit les profils (ils sont aussi relus seuls à chaque lancement).
+ExecReload=/bin/kill -HUP $MAINPID
+# SIGTERM : remet la base de M1 puis s'arrête.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=1
+RuntimeDirectory=rago-profiled
+RuntimeDirectoryMode=0755
+# Garder le fichier d'état si le démon s'arrête : il sert à la reprise.
+RuntimeDirectoryPreserve=yes
+
+# Droits : en root, il écrit dans /sys (fichiers root 0644) et ouvre
+# /dev/cpu_dma_latency sans capacité particulière ; CAP_CHOWN sert à donner
+# le socket au groupe rago. Les hooks héritent de ce cadre : M9 (GPU) pourra
+# demander plus de droits, M6 ajoutera ReadWritePaths= pour RAGO-COMM.
+CapabilityBoundingSet=CAP_CHOWN
+NoNewPrivileges=yes
+# /sys et /dev doivent rester écrivables : PAS de ProtectKernelTunables, ni
+# de PrivateDevices, ni de ProtectClock (qui ajoute une liste DeviceAllow et
+# couperait /dev/cpu_dma_latency).
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

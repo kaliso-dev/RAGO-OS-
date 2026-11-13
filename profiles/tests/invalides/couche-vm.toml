@@ -1,0 +1,4 @@
+schema = 1
+id = "couche-vm"
+name = "X"
+couche = "vm"

@@ -1,0 +1,1 @@
+{"schema": 1, "id": "exe-avec-chemin", "name": "X", "couche": "proton", "match": {"exe": ["bin/x64/Jeu.exe"]}}

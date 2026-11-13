@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "fortnite",
+  "name": "Fortnite",
+  "couche": "switch",
+  "anticheat": "Easy Anti-Cheat / BattlEye",
+  "verified": false,
+  "notes": "Epic n'autorise pas Fortnite sous Proton : couche switch. Profil perf (VBS / HVCI coupés) à confirmer sur matériel ; Secure Boot et TPM restent actifs dans les deux profils.",
+  "match": {
+    "exe": ["FortniteClient-Win64-Shipping.exe"]
+  },
+  "windows_security": "perf"
+}

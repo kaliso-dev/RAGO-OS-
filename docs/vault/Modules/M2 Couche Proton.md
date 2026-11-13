@@ -1,7 +1,7 @@
 ---
 type: module
 tags: [module, phase-A]
-maj: 2026-11-12
+maj: 2026-11-13
 statut: À FAIRE
 ---
 # M2 Couche Proton
@@ -15,6 +15,8 @@ statut: À FAIRE
 - `host/gamescope/rago-session.sh` — session gamescope console-like
 
 **Ce qu'il fait.** Steam + Proton-GE épinglé, Heroic, runtimes EAC/BattlEye. Session gamescope plein écran (VRR/HDR, --rt, tearing). gamemode + MangoHud. Au lancement : applique le profil [[M14 Profils par jeu]] + hint [[Noyau et ordonnanceur]]. Pré-chauffage cache shaders.
+
+**Accroche prête (M14, 13/11).** Le hook de lancement = `rago-profiled launch -- %command%` (option de lancement Steam) : profil + hint M0 en une commande. À coordonner : gamemode ne doit pas reprendre la main sur le gouverneur ([[Questions ouvertes]]).
 
 **Dépend de / relié à :** [[Couche Proton]], [[M0 Noyau scx_rago]], [[M14 Profils par jeu]]
 

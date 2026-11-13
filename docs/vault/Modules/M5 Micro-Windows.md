@@ -1,7 +1,7 @@
 ---
 type: module
 tags: [module, phase-B]
-maj: 2026-11-12
+maj: 2026-11-13
 statut: À FAIRE
 ---
 # M5 Micro-Windows
@@ -15,6 +15,8 @@ statut: À FAIRE
 - `windows/autounattend.xml` — install sans surveillance, AutoLogon silencieux
 
 **Ce qu'il fait.** Base Win 11 IoT LTSC 25H2 (BYOL). Purge WinSxS agressive, services coupés, shell = rago-shell, services anti-triche forcés. GARDE Secure Boot/TPM/VBS/HVCI/IOMMU ([[Vanguard On-Demand]]) + noyau NT/DirectX/.NET/VC++/réseau. Deux profils de sécurité (compat max / perf) pilotés par [[M14 Profils par jeu]].
+
+**Accroche prête (M14, 13/11).** `rago-profiled prepare-switch --id <jeu>` appelle le hook `/usr/lib/rago/hooks/windows-security set` avec `RAGO_WINDOWS_SECURITY=compat_max|perf` (profil JSON sur l'entrée standard). M5/M6 doivent fournir ce hook (écrire le profil dans RAGO-COMM) et l'appliquer dans le micro-Windows. Contrat : `profiles/README.md`.
 
 **Dépend de / relié à :** [[Micro-Windows]], [[Vanguard On-Demand]], [[M6 Fast OS Switch]], [[M14 Profils par jeu]]
 

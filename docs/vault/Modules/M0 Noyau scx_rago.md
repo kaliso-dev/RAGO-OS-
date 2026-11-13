@@ -20,7 +20,7 @@ statut: EN COURS
 - `kernel/scx/rago-common/` — brique commune Rust (protocole du socket, topologie, serveur, client, affinité).
 - `host/bin/rago-sched-hint/` — outil du launcher (`rago-sched-hint run -- <jeu>`, `tag`, `untag`, `list`, `status`, `topology`).
 - `host/systemd/rago-scx.service` — chargement de scx_rago au boot, relance limitée, filet EEVDF+BORE.
-- `Cargo.toml` (racine) — espace de travail Rust (scx_rago, rago-common, rago-sched-hint).
+- `Cargo.toml` (racine) — espace de travail Rust (scx_rago, rago-common, rago-sched-hint ; depuis le 13/11 aussi `rago-profiled` de [[M14 Profils par jeu]]).
 - Tests : `kernel/tests/test_kernel_lib.sh`, `kernel/tests/vm/run_scx_vm_test.sh` + `kernel/tests/vm/vm_init.sh`, `kernel/tests/m0_hardware_test.sh`, `kernel/tests/check_routing.sh`, `kernel/tests/fake_game.c`.
 
 ## Ce qu'il fait
