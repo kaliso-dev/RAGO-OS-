@@ -167,7 +167,11 @@ impl Daemon {
         actions.extend(g.applier.apply(&eff));
         let id = g.next;
         g.next += 1;
-        let label = if label.is_empty() { eff.id.clone() } else { label.to_string() };
+        let label = if label.is_empty() {
+            eff.id.clone()
+        } else {
+            label.to_string()
+        };
         log(&format!(
             "session {id} (uid {uid}, pid {pid}) « {label} » : profil {} ({})",
             eff.id,
@@ -211,7 +215,10 @@ impl Daemon {
             actions.push(Action::new(
                 "profil",
                 S::Info,
-                format!("le jeu « {label} » tourne encore : son profil {} revient", eff.id),
+                format!(
+                    "le jeu « {label} » tourne encore : son profil {} revient",
+                    eff.id
+                ),
             ));
             actions.extend(g.applier.apply(&eff));
         } else {
@@ -285,7 +292,11 @@ impl Daemon {
             Some(v) => format!("{v} µs"),
             None => "illisible".into(),
         };
-        actions.push(Action::new("cstates", S::Info, format!("{hold} ; {base} ; latence effective {eff}")));
+        actions.push(Action::new(
+            "cstates",
+            S::Info,
+            format!("{hold} ; {base} ; latence effective {eff}"),
+        ));
         actions.push(Action::new(
             "mitigations",
             S::Info,
@@ -348,7 +359,10 @@ impl Daemon {
             HookOutcome::Refused(m) => Action::new(K, S::Error, format!("hook refusé : {m}")),
             HookOutcome::Failed(m) => Action::new(K, S::Error, format!("hook en échec : {m}")),
         });
-        log(&format!("switch : profil {} -> windows_security {value}", eff.id));
+        log(&format!(
+            "switch : profil {} -> windows_security {value}",
+            eff.id
+        ));
         log_actions("switch : ", &actions);
         Response {
             ok: true,
@@ -427,7 +441,9 @@ fn handle_conn(stream: UnixStream, d: &Daemon) -> io::Result<()> {
             if v != PROTO_VERSION {
                 return send(
                     &mut w,
-                    &Response::err(format!("protocole {v} non pris en charge (démon : {PROTO_VERSION})")),
+                    &Response::err(format!(
+                        "protocole {v} non pris en charge (démon : {PROTO_VERSION})"
+                    )),
                 );
             }
             let resp = d.begin(peer.uid, peer.pid, &query, &label);
@@ -448,10 +464,15 @@ fn handle_conn(stream: UnixStream, d: &Daemon) -> io::Result<()> {
                         return Ok(());
                     }
                     Ok(Read1::Req(Request::Status)) => send(&mut w, &d.status())?,
-                    Ok(Read1::Req(_)) => send(&mut w, &Response::err("session ouverte : seul « end » est accepté"))?,
+                    Ok(Read1::Req(_)) => send(
+                        &mut w,
+                        &Response::err("session ouverte : seul « end » est accepté"),
+                    )?,
                     Ok(Read1::Bad(e)) => send(&mut w, &Response::err(e))?,
                     Ok(Read1::Eof) | Err(_) => {
-                        log(&format!("session {id} : le launcher est parti sans « end »"));
+                        log(&format!(
+                            "session {id} : le launcher est parti sans « end »"
+                        ));
                         return Ok(()); // guard -> end()
                     }
                 }
@@ -463,7 +484,9 @@ fn handle_conn(stream: UnixStream, d: &Daemon) -> io::Result<()> {
             if v != PROTO_VERSION {
                 return send(
                     &mut w,
-                    &Response::err(format!("protocole {v} non pris en charge (démon : {PROTO_VERSION})")),
+                    &Response::err(format!(
+                        "protocole {v} non pris en charge (démon : {PROTO_VERSION})"
+                    )),
                 );
             }
             send(&mut w, &d.prepare_switch(&query))
@@ -524,9 +547,18 @@ extern "C" fn on_hup(_: libc::c_int) {
 fn install_signals() {
     // SAFETY: les gestionnaires ne font qu'écrire un AtomicBool.
     unsafe {
-        libc::signal(libc::SIGTERM, on_stop as extern "C" fn(libc::c_int) as libc::sighandler_t);
-        libc::signal(libc::SIGINT, on_stop as extern "C" fn(libc::c_int) as libc::sighandler_t);
-        libc::signal(libc::SIGHUP, on_hup as extern "C" fn(libc::c_int) as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            on_stop as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            on_stop as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGHUP,
+            on_hup as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        );
     }
 }
 
@@ -669,7 +701,11 @@ mod tests {
         // B ne fixe ni gouverneur ni THP : la base revient pendant B.
         assert_eq!(f.gov(0), "performance");
         assert_eq!(f.thp(), "madvise");
-        assert!(b.actions.iter().any(|x| x.knob == "gpu_clocks" && x.status == S::Pending));
+        assert!(
+            b.actions
+                .iter()
+                .any(|x| x.knob == "gpu_clocks" && x.status == S::Pending)
+        );
         let st = d.status();
         assert_eq!(st.sessions.len(), 2);
         assert!(st.sessions[1].active && !st.sessions[0].active);
@@ -679,7 +715,11 @@ mod tests {
         assert_eq!(f.thp(), "always");
         // Fin de A : base exacte, fichier d'état supprimé.
         let r = d.end(a.session.unwrap());
-        assert!(r.actions.iter().all(|x| x.status == S::Restored), "{:?}", r.actions);
+        assert!(
+            r.actions.iter().all(|x| x.status == S::Restored),
+            "{:?}",
+            r.actions
+        );
         assert_eq!(f.gov(0), "performance");
         assert_eq!(f.thp(), "madvise");
         assert!(!f.root().join("run").join(STATE_FILE).exists());
@@ -737,13 +777,19 @@ mod tests {
         // Jeu inconnu : repli, compat_max.
         let r = d.prepare_switch(&q("inconnu"));
         assert!(r.ok);
-        assert_eq!(r.profile.unwrap().windows_security, WindowsSecurity::CompatMax);
+        assert_eq!(
+            r.profile.unwrap().windows_security,
+            WindowsSecurity::CompatMax
+        );
         // Le hook de M5/M6 reçoit la valeur.
         let out = f.root().join("comm.txt");
         let h = f.root().join("hooks/windows-security");
         fs::write(
             &h,
-            format!("#!/bin/sh\necho \"$1 $RAGO_PROFILE_ID $RAGO_WINDOWS_SECURITY\" > {}\n", out.display()),
+            format!(
+                "#!/bin/sh\necho \"$1 $RAGO_PROFILE_ID $RAGO_WINDOWS_SECURITY\" > {}\n",
+                out.display()
+            ),
         )
         .unwrap();
         fs::set_permissions(&h, fs::Permissions::from_mode(0o755)).unwrap();

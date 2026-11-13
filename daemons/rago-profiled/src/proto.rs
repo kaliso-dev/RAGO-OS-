@@ -95,7 +95,13 @@ impl Action {
 
 impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:<17} {:<12} {}", self.knob, self.status.label(), self.detail)
+        write!(
+            f,
+            "{:<17} {:<12} {}",
+            self.knob,
+            self.status.label(),
+            self.detail
+        )
     }
 }
 
@@ -155,9 +161,15 @@ mod tests {
             label: "cs2".into(),
         };
         let j = serde_json::to_string(&r).unwrap();
-        assert_eq!(j, r#"{"op":"apply","v":1,"query":{"id":"cs2"},"label":"cs2"}"#);
+        assert_eq!(
+            j,
+            r#"{"op":"apply","v":1,"query":{"id":"cs2"},"label":"cs2"}"#
+        );
         assert_eq!(serde_json::from_str::<Request>(&j).unwrap(), r);
-        assert_eq!(serde_json::to_string(&Request::End).unwrap(), r#"{"op":"end"}"#);
+        assert_eq!(
+            serde_json::to_string(&Request::End).unwrap(),
+            r#"{"op":"end"}"#
+        );
         assert!(serde_json::from_str::<Request>(r#"{"op":"rm -rf"}"#).is_err());
         let a = Action::new("thp", ActionStatus::Pending, "x");
         assert_eq!(

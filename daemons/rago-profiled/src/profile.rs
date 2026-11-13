@@ -294,10 +294,13 @@ impl Profile {
                 self.id
             ));
         }
-        if let Some(s) = stem {
-            if s != self.id {
-                e.push(format!("id « {} » différent du nom du fichier « {s} »", self.id));
-            }
+        if let Some(s) = stem
+            && s != self.id
+        {
+            e.push(format!(
+                "id « {} » différent du nom du fichier « {s} »",
+                self.id
+            ));
         }
         if self.name.trim().is_empty() || !valid_text(&self.name, 120) {
             e.push("name vide, trop long (120 max) ou avec des caractères de contrôle".into());
@@ -309,13 +312,17 @@ impl Profile {
         }
         for x in &self.matching.exe {
             if !valid_exe(x) {
-                e.push(format!("match.exe « {x} » invalide (nom de fichier seul, sans / ni \\)"));
+                e.push(format!(
+                    "match.exe « {x} » invalide (nom de fichier seul, sans / ni \\)"
+                ));
             }
         }
-        if let Some(g) = &self.cpu_governor {
-            if !valid_governor(g) {
-                e.push(format!("cpu_governor « {g} » invalide (a-z, 0-9, _ ; 15 max)"));
-            }
+        if let Some(g) = &self.cpu_governor
+            && !valid_governor(g)
+        {
+            e.push(format!(
+                "cpu_governor « {g} » invalide (a-z, 0-9, _ ; 15 max)"
+            ));
         }
         if let Some(h) = &self.sched_hint {
             if h.render_comm.len() > MAX_RENDER_COMMS {
@@ -338,15 +345,15 @@ impl Profile {
                     if g.core_mhz.is_none() && g.mem_mhz.is_none() {
                         e.push("gpu_clocks.mode = fixed demande core_mhz et/ou mem_mhz".into());
                     }
-                    if let Some(c) = g.core_mhz {
-                        if !(100..=5000).contains(&c) {
-                            e.push(format!("gpu_clocks.core_mhz = {c} hors de 100..5000"));
-                        }
+                    if let Some(c) = g.core_mhz
+                        && !(100..=5000).contains(&c)
+                    {
+                        e.push(format!("gpu_clocks.core_mhz = {c} hors de 100..5000"));
                     }
-                    if let Some(m) = g.mem_mhz {
-                        if !(100..=40000).contains(&m) {
-                            e.push(format!("gpu_clocks.mem_mhz = {m} hors de 100..40000"));
-                        }
+                    if let Some(m) = g.mem_mhz
+                        && !(100..=40000).contains(&m)
+                    {
+                        e.push(format!("gpu_clocks.mem_mhz = {m} hors de 100..40000"));
                     }
                 }
                 GpuMode::Auto | GpuMode::Max => {
@@ -359,15 +366,15 @@ impl Profile {
                 }
             }
         }
-        if let Some(a) = &self.anticheat {
-            if !valid_text(a, 64) {
-                e.push("anticheat trop long (64 max)".into());
-            }
+        if let Some(a) = &self.anticheat
+            && !valid_text(a, 64)
+        {
+            e.push("anticheat trop long (64 max)".into());
         }
-        if let Some(n) = &self.notes {
-            if !valid_text(n, 2000) {
-                e.push("notes trop longues (2000 max)".into());
-            }
+        if let Some(n) = &self.notes
+            && !valid_text(n, 2000)
+        {
+            e.push("notes trop longues (2000 max)".into());
         }
 
         let w = &mut f.warnings;
@@ -404,12 +411,17 @@ impl Profile {
                     ));
                 }
                 if self.windows_security.is_none() {
-                    w.push("couche switch sans windows_security : compat_max (sûr) sera utilisé".into());
+                    w.push(
+                        "couche switch sans windows_security : compat_max (sûr) sera utilisé"
+                            .into(),
+                    );
                 }
             }
             Couche::Proton => {
                 if self.windows_security.is_some() {
-                    w.push("couche proton : windows_security ignoré (sert seulement au switch)".into());
+                    w.push(
+                        "couche proton : windows_security ignoré (sert seulement au switch)".into(),
+                    );
                 }
             }
         }
@@ -429,7 +441,10 @@ pub fn parse_file(path: &Path) -> Result<(Profile, Vec<String>), String> {
         return Err("pas un fichier ordinaire".into());
     }
     if meta.len() > MAX_FILE_SIZE {
-        return Err(format!("trop gros ({} octets, {MAX_FILE_SIZE} max)", meta.len()));
+        return Err(format!(
+            "trop gros ({} octets, {MAX_FILE_SIZE} max)",
+            meta.len()
+        ));
     }
     let text = fs::read_to_string(path).map_err(|e| format!("illisible : {e}"))?;
     let p: Profile = match ext {
@@ -448,7 +463,10 @@ pub fn parse_file(path: &Path) -> Result<(Profile, Vec<String>), String> {
 fn is_profile_file(p: &Path) -> bool {
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
     !name.starts_with('.')
-        && matches!(p.extension().and_then(|e| e.to_str()), Some("toml" | "json"))
+        && matches!(
+            p.extension().and_then(|e| e.to_str()),
+            Some("toml" | "json")
+        )
 }
 
 // --- profil effectif ------------------------------------------------------------------------
@@ -774,23 +792,22 @@ impl Store {
     /// Jeu -> profil effectif. Ordre : id, puis steam_appid, puis exe ; sinon
     /// le profil sûr par défaut, avec la raison.
     pub fn resolve(&self, q: &Query) -> Effective {
-        let found = q
-            .id
-            .as_ref()
-            .and_then(|i| self.by_id.get(i).map(|e| (e, "id")))
-            .or_else(|| {
-                q.steam_appid
-                    .and_then(|a| self.by_appid.get(&a))
-                    .and_then(|i| self.by_id.get(i))
-                    .map(|e| (e, "steam_appid"))
-            })
-            .or_else(|| {
-                q.exe
-                    .as_ref()
-                    .and_then(|x| self.by_exe.get(&exe_key(x)))
-                    .and_then(|i| self.by_id.get(i))
-                    .map(|e| (e, "exe"))
-            });
+        let found =
+            q.id.as_ref()
+                .and_then(|i| self.by_id.get(i).map(|e| (e, "id")))
+                .or_else(|| {
+                    q.steam_appid
+                        .and_then(|a| self.by_appid.get(&a))
+                        .and_then(|i| self.by_id.get(i))
+                        .map(|e| (e, "steam_appid"))
+                })
+                .or_else(|| {
+                    q.exe
+                        .as_ref()
+                        .and_then(|x| self.by_exe.get(&exe_key(x)))
+                        .and_then(|i| self.by_id.get(i))
+                        .map(|e| (e, "exe"))
+                });
         if let Some((e, how)) = found {
             return Effective::from_profile(&e.profile, &e.path, how, &e.warnings);
         }
@@ -849,7 +866,10 @@ mode = "max"
         assert_eq!(by_id.thp, Some(Thp::Always));
         assert_eq!(by_id.cstates, Some(CStates::Shallow));
         assert_eq!(by_id.gpu_clocks.mode, GpuMode::Max);
-        assert_eq!(by_id.sched_hint.render_comm, vec!["RenderThread".to_string()]);
+        assert_eq!(
+            by_id.sched_hint.render_comm,
+            vec!["RenderThread".to_string()]
+        );
         let by_app = s.resolve(&Query {
             steam_appid: Some(1091500),
             ..Default::default()
@@ -920,11 +940,27 @@ mode = "max"
     #[test]
     fn broken_profile_falls_back_with_reason_and_never_panics() {
         let d = tempfile::tempdir().unwrap();
-        write(d.path(), "casse.toml", "schema = 1\nid = \"casse\"\nname = \"x\"\ncouche = \"proton\"\nthp = \"never\"\n");
+        write(
+            d.path(),
+            "casse.toml",
+            "schema = 1\nid = \"casse\"\nname = \"x\"\ncouche = \"proton\"\nthp = \"never\"\n",
+        );
         write(d.path(), "pas-du-toml.toml", "{{{{ ceci n'est pas du TOML");
-        write(d.path(), "mauvais-nom.toml", "schema = 1\nid = \"autre-id\"\nname = \"x\"\ncouche = \"proton\"\n");
-        write(d.path(), "inconnu.toml", "schema = 1\nid = \"inconnu\"\nname = \"x\"\ncouche = \"proton\"\nturbo = true\n");
-        write(d.path(), "futur.toml", "schema = 2\nid = \"futur\"\nname = \"x\"\ncouche = \"proton\"\n");
+        write(
+            d.path(),
+            "mauvais-nom.toml",
+            "schema = 1\nid = \"autre-id\"\nname = \"x\"\ncouche = \"proton\"\n",
+        );
+        write(
+            d.path(),
+            "inconnu.toml",
+            "schema = 1\nid = \"inconnu\"\nname = \"x\"\ncouche = \"proton\"\nturbo = true\n",
+        );
+        write(
+            d.path(),
+            "futur.toml",
+            "schema = 2\nid = \"futur\"\nname = \"x\"\ncouche = \"proton\"\n",
+        );
         write(d.path(), "ignore.txt", "pas un profil");
         write(d.path(), ".cache.toml", "caché");
         let s = Store::load(&[d.path().to_path_buf()]);
@@ -935,7 +971,11 @@ mode = "max"
             ..Default::default()
         });
         assert!(e.is_fallback());
-        assert!(e.fallback.as_ref().unwrap().contains("refusé"), "{:?}", e.fallback);
+        assert!(
+            e.fallback.as_ref().unwrap().contains("refusé"),
+            "{:?}",
+            e.fallback
+        );
     }
 
     #[test]
@@ -969,9 +1009,21 @@ mode = "max"
     #[test]
     fn duplicates_in_same_dir_and_key_conflicts() {
         let d = tempfile::tempdir().unwrap();
-        write(d.path(), "a.toml", "schema = 1\nid = \"a\"\nname = \"A\"\ncouche = \"proton\"\n[match]\nsteam_appid = [42]\n");
-        write(d.path(), "a.json", r#"{"schema":1,"id":"a","name":"A json","couche":"proton"}"#);
-        write(d.path(), "b.toml", "schema = 1\nid = \"b\"\nname = \"B\"\ncouche = \"proton\"\n[match]\nsteam_appid = [42]\n");
+        write(
+            d.path(),
+            "a.toml",
+            "schema = 1\nid = \"a\"\nname = \"A\"\ncouche = \"proton\"\n[match]\nsteam_appid = [42]\n",
+        );
+        write(
+            d.path(),
+            "a.json",
+            r#"{"schema":1,"id":"a","name":"A json","couche":"proton"}"#,
+        );
+        write(
+            d.path(),
+            "b.toml",
+            "schema = 1\nid = \"b\"\nname = \"B\"\ncouche = \"proton\"\n[match]\nsteam_appid = [42]\n",
+        );
         let s = Store::load(&[d.path().to_path_buf()]);
         // a.json est lu en premier (ordre alphabétique) ; a.toml est refusé.
         assert_eq!(s.errors.len(), 1, "{:?}", s.errors);
@@ -992,8 +1044,16 @@ mode = "max"
         .unwrap();
         let f = p.validate(Some("valorant"));
         assert!(f.errors.is_empty());
-        assert!(f.warnings.iter().any(|w| w.contains("thp")), "{:?}", f.warnings);
-        assert!(f.warnings.iter().any(|w| w.contains("compat_max")), "{:?}", f.warnings);
+        assert!(
+            f.warnings.iter().any(|w| w.contains("thp")),
+            "{:?}",
+            f.warnings
+        );
+        assert!(
+            f.warnings.iter().any(|w| w.contains("compat_max")),
+            "{:?}",
+            f.warnings
+        );
         let e = Effective::from_profile(&p, Path::new("/x/valorant.toml"), "id", &f.warnings);
         assert_eq!(e.thp, None);
         assert_eq!(e.windows_security, WindowsSecurity::CompatMax);
@@ -1010,13 +1070,37 @@ mode = "max"
         };
         assert!(base("").errors.is_empty());
         assert!(!base("cpu_governor = \"Performance\"\n").errors.is_empty());
-        assert!(!base("cpu_governor = \"a_very_long_governor\"\n").errors.is_empty());
+        assert!(
+            !base("cpu_governor = \"a_very_long_governor\"\n")
+                .errors
+                .is_empty()
+        );
         assert!(!base("[gpu_clocks]\nmode = \"fixed\"\n").errors.is_empty());
-        assert!(!base("[gpu_clocks]\nmode = \"max\"\ncore_mhz = 2000\n").errors.is_empty());
-        assert!(!base("[gpu_clocks]\nmode = \"fixed\"\ncore_mhz = 99999\n").errors.is_empty());
-        assert!(base("[gpu_clocks]\nmode = \"fixed\"\ncore_mhz = 1800\nmem_mhz = 7000\n").errors.is_empty());
-        assert!(!base("[sched_hint]\nrender_comm = [\"avec espace\"]\n").errors.is_empty());
-        assert!(!base("[sched_hint]\nrender_comm = [\"motif-beaucoup-trop-long\"]\n").errors.is_empty());
+        assert!(
+            !base("[gpu_clocks]\nmode = \"max\"\ncore_mhz = 2000\n")
+                .errors
+                .is_empty()
+        );
+        assert!(
+            !base("[gpu_clocks]\nmode = \"fixed\"\ncore_mhz = 99999\n")
+                .errors
+                .is_empty()
+        );
+        assert!(
+            base("[gpu_clocks]\nmode = \"fixed\"\ncore_mhz = 1800\nmem_mhz = 7000\n")
+                .errors
+                .is_empty()
+        );
+        assert!(
+            !base("[sched_hint]\nrender_comm = [\"avec espace\"]\n")
+                .errors
+                .is_empty()
+        );
+        assert!(
+            !base("[sched_hint]\nrender_comm = [\"motif-beaucoup-trop-long\"]\n")
+                .errors
+                .is_empty()
+        );
         assert!(
             !base("[sched_hint]\nrender_comm = [\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"]\n")
                 .errors
@@ -1025,11 +1109,17 @@ mode = "max"
         assert!(!base("[match]\nsteam_appid = [0]\n").errors.is_empty());
         assert!(!base("[match]\nexe = [\"bin/jeu.exe\"]\n").errors.is_empty());
         assert!(!base("windows_security = \"perf\"\n").warnings.is_empty());
-        let p: Profile = toml::from_str("schema = 1\nid = \"Majuscule\"\nname = \"X\"\ncouche = \"proton\"\n").unwrap();
+        let p: Profile =
+            toml::from_str("schema = 1\nid = \"Majuscule\"\nname = \"X\"\ncouche = \"proton\"\n")
+                .unwrap();
         assert!(!p.validate(None).errors.is_empty());
-        let p: Profile = toml::from_str("schema = 1\nid = \"x\"\nname = \"  \"\ncouche = \"proton\"\n").unwrap();
+        let p: Profile =
+            toml::from_str("schema = 1\nid = \"x\"\nname = \"  \"\ncouche = \"proton\"\n").unwrap();
         assert!(!p.validate(None).errors.is_empty());
-        assert!(toml::from_str::<Profile>("schema = 1\nid = \"x\"\nname = \"X\"\ncouche = \"vm\"\n").is_err());
+        assert!(
+            toml::from_str::<Profile>("schema = 1\nid = \"x\"\nname = \"X\"\ncouche = \"vm\"\n")
+                .is_err()
+        );
         assert!(toml::from_str::<Profile>("schema = 1\nid = \"x\"\nname = \"X\"\ncouche = \"proton\"\nmitigations = \"auto\"\n").is_err());
     }
 

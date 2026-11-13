@@ -135,7 +135,13 @@ impl Hooks {
 
     /// Lance un hook : `<dossier>/<name> <args…>`, profil effectif en JSON
     /// sur l'entrée standard, variables `env` seulement (plus PATH et LANG).
-    pub fn run(&self, name: &str, args: &[&str], env: &[(&str, String)], stdin: &str) -> HookOutcome {
+    pub fn run(
+        &self,
+        name: &str,
+        args: &[&str],
+        env: &[(&str, String)],
+        stdin: &str,
+    ) -> HookOutcome {
         let path = self.path(name);
         match fs::symlink_metadata(&path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return HookOutcome::Absent,
@@ -175,7 +181,12 @@ impl Hooks {
         }
         let mut child = match cmd.spawn() {
             Ok(c) => c,
-            Err(e) => return HookOutcome::Failed(format!("lancement de {} impossible : {e}", path.display())),
+            Err(e) => {
+                return HookOutcome::Failed(format!(
+                    "lancement de {} impossible : {e}",
+                    path.display()
+                ));
+            }
         };
         if let Some(mut si) = child.stdin.take() {
             // Un hook qui ne lit pas son entrée ne doit pas bloquer le démon.
@@ -256,7 +267,10 @@ mod tests {
     #[test]
     fn absent_hook_is_pending_not_an_error() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(hooks(d.path()).run("gpu-clocks", &["apply"], &[], "{}"), HookOutcome::Absent);
+        assert_eq!(
+            hooks(d.path()).run("gpu-clocks", &["apply"], &[], "{}"),
+            HookOutcome::Absent
+        );
     }
 
     #[test]
@@ -279,27 +293,50 @@ mod tests {
             "{\"id\":\"x\"}",
         );
         assert_eq!(r, HookOutcome::Ok("appliqué".into()));
-        assert_eq!(fs::read_to_string(&log).unwrap(), "apply|max|vide|{\"id\":\"x\"}\n");
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            "apply|max|vide|{\"id\":\"x\"}\n"
+        );
     }
 
     #[test]
     fn failing_slow_and_unsafe_hooks() {
         let d = tempfile::tempdir().unwrap();
-        hook(d.path(), "echec", "#!/bin/sh\necho 'carte absente' >&2\nexit 4\n", 0o755);
+        hook(
+            d.path(),
+            "echec",
+            "#!/bin/sh\necho 'carte absente' >&2\nexit 4\n",
+            0o755,
+        );
         hook(d.path(), "lent", "#!/bin/sh\nsleep 30\n", 0o755);
-        hook(d.path(), "fond", "#!/bin/sh\nsleep 30 &\necho lancé\n", 0o755);
+        hook(
+            d.path(),
+            "fond",
+            "#!/bin/sh\nsleep 30 &\necho lancé\n",
+            0o755,
+        );
         hook(d.path(), "ouvert", "#!/bin/sh\nexit 0\n", 0o777);
         hook(d.path(), "non-exec", "#!/bin/sh\nexit 0\n", 0o644);
         let mut h = hooks(d.path());
         match h.run("echec", &[], &[], "") {
-            HookOutcome::Failed(m) => assert!(m.contains("code 4") && m.contains("carte absente"), "{m}"),
+            HookOutcome::Failed(m) => {
+                assert!(m.contains("code 4") && m.contains("carte absente"), "{m}")
+            }
             o => panic!("{o:?}"),
         }
-        assert!(matches!(h.run("ouvert", &[], &[], ""), HookOutcome::Refused(_)));
-        assert!(matches!(h.run("non-exec", &[], &[], ""), HookOutcome::Refused(_)));
+        assert!(matches!(
+            h.run("ouvert", &[], &[], ""),
+            HookOutcome::Refused(_)
+        ));
+        assert!(matches!(
+            h.run("non-exec", &[], &[], ""),
+            HookOutcome::Refused(_)
+        ));
         h.timeout = Duration::from_millis(300);
         let t = Instant::now();
-        assert!(matches!(h.run("lent", &[], &[], ""), HookOutcome::Failed(m) if m.contains("délai")));
+        assert!(
+            matches!(h.run("lent", &[], &[], ""), HookOutcome::Failed(m) if m.contains("délai"))
+        );
         assert!(t.elapsed() < Duration::from_secs(5));
         // Un enfant en arrière-plan qui garde la sortie ne bloque pas le démon.
         h.timeout = Duration::from_secs(5);
@@ -308,6 +345,8 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(5));
         // Dossier modifiable par tous : tout est refusé.
         fs::set_permissions(d.path(), fs::Permissions::from_mode(0o777)).unwrap();
-        assert!(matches!(h.run("echec", &[], &[], ""), HookOutcome::Refused(m) if m.contains("dossier")));
+        assert!(
+            matches!(h.run("echec", &[], &[], ""), HookOutcome::Refused(m) if m.contains("dossier"))
+        );
     }
 }

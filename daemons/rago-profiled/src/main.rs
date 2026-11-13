@@ -45,8 +45,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::profile::{Couche, DEFAULT_PROFILE_DIRS, Effective, Query, Store, exe_key, parse_file};
 use crate::proto::{
-    Action, ActionStatus, DEFAULT_GROUP, DEFAULT_SOCKET, DEFAULT_STATE_DIR, MAX_LINE, PROTO_VERSION,
-    Request, Response,
+    Action, ActionStatus, DEFAULT_GROUP, DEFAULT_SOCKET, DEFAULT_STATE_DIR, MAX_LINE,
+    PROTO_VERSION, Request, Response,
 };
 
 /// Le démon ne répond pas.
@@ -240,9 +240,13 @@ impl Conn {
         let mut back = String::new();
         let n = io::Read::take(&mut self.r, MAX_LINE as u64 + 1).read_line(&mut back)?;
         if n == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "le démon a fermé la connexion"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "le démon a fermé la connexion",
+            ));
         }
-        serde_json::from_str(back.trim_end()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        serde_json::from_str(back.trim_end())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 }
 
@@ -311,7 +315,10 @@ fn build_argv(
     let bin = match hint_bin {
         Some(p) if p.is_file() => Some(p.to_path_buf()),
         Some(p) => {
-            ctx.warn(&format!("{} introuvable : jeu lancé sans hint ordonnanceur", p.display()));
+            ctx.warn(&format!(
+                "{} introuvable : jeu lancé sans hint ordonnanceur",
+                p.display()
+            ));
             None
         }
         None => {
@@ -352,7 +359,11 @@ fn describe(eff: &Effective) -> String {
             eff.name,
             eff.couche,
             eff.matched_by.as_deref().unwrap_or("?"),
-            if eff.verified { "" } else { ", pas encore vérifié sur matériel" }
+            if eff.verified {
+                ""
+            } else {
+                ", pas encore vérifié sur matériel"
+            }
         ),
     }
 }
@@ -375,11 +386,10 @@ fn cmd_launch(
     if q.exe.is_none() {
         q.exe = guess_exe(command);
     }
-    let label = q
-        .id
-        .clone()
-        .or_else(|| q.exe.clone())
-        .unwrap_or_else(|| "jeu".into());
+    let label =
+        q.id.clone()
+            .or_else(|| q.exe.clone())
+            .unwrap_or_else(|| "jeu".into());
 
     let opened = Conn::open(&ctx.socket).and_then(|mut c| {
         let r = c.call(&Request::Apply {
@@ -420,7 +430,10 @@ fn cmd_launch(
     let mut child = match Command::new(&argv[0]).args(&argv[1..]).spawn() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("rago-profiled : impossible d'exécuter « {} » : {e}", argv[0]);
+            eprintln!(
+                "rago-profiled : impossible d'exécuter « {} » : {e}",
+                argv[0]
+            );
             if let Some(c) = conn.as_mut() {
                 let _ = c.call(&Request::End);
             }
@@ -483,7 +496,10 @@ fn cmd_prepare_switch(ctx: &Ctx, game: &GameArgs) -> ExitCode {
             ExitCode::FAILURE
         }
         Err(e) => {
-            eprintln!("rago-profiled : démon injoignable ({}) : {e}", ctx.socket.display());
+            eprintln!(
+                "rago-profiled : démon injoignable ({}) : {e}",
+                ctx.socket.display()
+            );
             ExitCode::from(EXIT_UNREACHABLE)
         }
     }
@@ -517,7 +533,10 @@ fn cmd_status(ctx: &Ctx, json: bool) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("rago-profiled : démon injoignable ({}) : {e}", ctx.socket.display());
+            eprintln!(
+                "rago-profiled : démon injoignable ({}) : {e}",
+                ctx.socket.display()
+            );
             ExitCode::from(EXIT_UNREACHABLE)
         }
     }
@@ -535,7 +554,14 @@ fn print_effective(e: &Effective) {
     if let Some(m) = &e.matched_by {
         println!("trouvé par       {m}");
     }
-    println!("vérifié          {}", if e.verified { "oui" } else { "non (pas encore testé sur matériel)" });
+    println!(
+        "vérifié          {}",
+        if e.verified {
+            "oui"
+        } else {
+            "non (pas encore testé sur matériel)"
+        }
+    );
     println!("cpu_governor     {}", or(e.cpu_governor.clone()));
     println!("thp              {}", or(e.thp.map(|t| t.to_string())));
     println!("cstates          {}", or(e.cstates.map(|c| c.to_string())));
@@ -560,12 +586,18 @@ fn print_effective(e: &Effective) {
     println!(
         "gpu_clocks       {}{}{}",
         g.mode,
-        g.core_mhz.map(|v| format!(" core {v} MHz")).unwrap_or_default(),
-        g.mem_mhz.map(|v| format!(" mem {v} MHz")).unwrap_or_default()
+        g.core_mhz
+            .map(|v| format!(" core {v} MHz"))
+            .unwrap_or_default(),
+        g.mem_mhz
+            .map(|v| format!(" mem {v} MHz"))
+            .unwrap_or_default()
     );
     println!(
         "mitigations      {}",
-        e.mitigations.map(|m| m.to_string()).unwrap_or_else(|| "non demandé (noyau inchangé)".into())
+        e.mitigations
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "non demandé (noyau inchangé)".into())
     );
     println!("windows_security {}", e.windows_security);
     for w in &e.warnings {
@@ -607,7 +639,11 @@ fn cmd_list(ctx: &Ctx) -> ExitCode {
     if v.is_empty() {
         eprintln!(
             "aucun profil dans {}",
-            ctx.dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")
+            ctx.dirs
+                .iter()
+                .map(|d| d.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
     ExitCode::SUCCESS
@@ -656,7 +692,11 @@ fn cmd_validate(ctx: &Ctx, paths: &[PathBuf]) -> ExitCode {
         }
     }
     println!("{good} profil(s) valide(s), {bad} refusé(s)");
-    if bad > 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+    if bad > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn main() -> ExitCode {
@@ -694,7 +734,13 @@ fn main() -> ExitCode {
             sched_hint_bin,
             no_sched_hint,
             command,
-        } => cmd_launch(&ctx, game, sched_hint_bin.as_deref(), *no_sched_hint, command),
+        } => cmd_launch(
+            &ctx,
+            game,
+            sched_hint_bin.as_deref(),
+            *no_sched_hint,
+            command,
+        ),
         Cmd::PrepareSwitch { game } => cmd_prepare_switch(&ctx, game),
         Cmd::Status { json } => cmd_status(&ctx, *json),
         Cmd::Show { game, json } => cmd_show(&ctx, game, *json),
@@ -711,10 +757,18 @@ mod tests {
     fn guesses_the_game_exe() {
         let c = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            guess_exe(&c(&["/x/proton", "waitforexitandrun", "/g/bin/x64/Cyberpunk2077.exe"])).as_deref(),
+            guess_exe(&c(&[
+                "/x/proton",
+                "waitforexitandrun",
+                "/g/bin/x64/Cyberpunk2077.exe"
+            ]))
+            .as_deref(),
             Some("cyberpunk2077.exe")
         );
-        assert_eq!(guess_exe(&c(&["/opt/cs2/cs2", "-novid"])).as_deref(), Some("cs2"));
+        assert_eq!(
+            guess_exe(&c(&["/opt/cs2/cs2", "-novid"])).as_deref(),
+            Some("cs2")
+        );
     }
 
     #[test]
@@ -732,12 +786,30 @@ mod tests {
         let v = build_argv(&ctx, &eff, Some(&bin), false, &cmd);
         assert_eq!(
             &v[1..],
-            &["run", "--confine", "off", "--render-comm", "GameThread", "--", "jeu", "--arg"]
+            &[
+                "run",
+                "--confine",
+                "off",
+                "--render-comm",
+                "GameThread",
+                "--",
+                "jeu",
+                "--arg"
+            ]
         );
         assert_eq!(build_argv(&ctx, &eff, Some(&bin), true, &cmd), cmd);
         eff.sched_hint.enabled = false;
         assert_eq!(build_argv(&ctx, &eff, Some(&bin), false, &cmd), cmd);
         eff.sched_hint.enabled = true;
-        assert_eq!(build_argv(&ctx, &eff, Some(Path::new("/absent/rago-sched-hint")), false, &cmd), cmd);
+        assert_eq!(
+            build_argv(
+                &ctx,
+                &eff,
+                Some(Path::new("/absent/rago-sched-hint")),
+                false,
+                &cmd
+            ),
+            cmd
+        );
     }
 }

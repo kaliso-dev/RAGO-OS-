@@ -89,7 +89,10 @@ impl System {
             .filter_map(|e| {
                 let n = e.file_name().to_string_lossy().to_string();
                 let num = n.strip_prefix("policy")?.parse().ok()?;
-                e.path().join("scaling_governor").exists().then_some((num, n))
+                e.path()
+                    .join("scaling_governor")
+                    .exists()
+                    .then_some((num, n))
             })
             .collect();
         v.sort();
@@ -115,7 +118,10 @@ impl System {
     }
 
     pub fn set_epp(&self, name: &str, v: &str) -> io::Result<()> {
-        write_sys(&self.policy_dir(name).join("energy_performance_preference"), v)
+        write_sys(
+            &self.policy_dir(name).join("energy_performance_preference"),
+            v,
+        )
     }
 
     /// Mode THP actif : « always [madvise] never » -> « madvise ».
@@ -156,8 +162,8 @@ impl System {
         let text = fs::read_to_string(self.p(M1_CONF)).ok()?;
         let line = text
             .lines()
-            .filter(|l| l.trim_start().starts_with("RAGO_CSTATES="))
-            .last()?;
+            .rev()
+            .find(|l| l.trim_start().starts_with("RAGO_CSTATES="))?;
         let v = line.trim_start().trim_start_matches("RAGO_CSTATES=").trim();
         let v = v.trim_matches('"').trim_matches('\'');
         CStates::parse(v)
@@ -339,6 +345,21 @@ impl Applier {
         if self.saved.is_none() {
             self.saved = Some(self.snapshot());
         }
+        // Sûreté en cas de mort du démon PENDANT l'application : le fichier
+        // d'état marque d'abord comme « touché » tout ce que ce profil va
+        // changer, AVANT la première écriture. Une reprise remettrait au pire
+        // une valeur déjà à la base (sans effet). En mémoire, les marqueurs
+        // exacts sont recalculés par chaque réglage.
+        let exact = self.saved.clone();
+        if let Some(s) = self.saved.as_mut() {
+            s.touched_governor |= eff.cpu_governor.is_some();
+            s.touched_thp |= eff.thp.is_some();
+            s.gpu_applied |= eff.gpu_clocks.mode != GpuMode::Auto;
+        }
+        if let Some(a) = self.persist() {
+            out.push(a);
+        }
+        self.saved = exact;
         out.push(self.apply_governor(eff.cpu_governor.as_deref()));
         out.push(self.apply_thp(eff.thp));
         out.push(self.apply_cstates(eff.cstates));
@@ -359,8 +380,16 @@ impl Applier {
             return Action::new(K, S::Skipped, "non demandé : base M1 gardée");
         }
         if saved.governors.is_empty() {
-            let what = if want.is_some() { "gouverneur non modifiable" } else { "rien à remettre" };
-            return Action::new(K, S::Skipped, format!("cpufreq absent sur cette machine : {what}"));
+            let what = if want.is_some() {
+                "gouverneur non modifiable"
+            } else {
+                "rien à remettre"
+            };
+            return Action::new(
+                K,
+                S::Skipped,
+                format!("cpufreq absent sur cette machine : {what}"),
+            );
         }
         let bases = saved.governors.clone();
         let mut touched = saved.touched_governor;
@@ -401,10 +430,9 @@ impl Applier {
                         if let (Some(epp), Some(now)) = (
                             &base.epp,
                             self.sys.read_policy(&base.policy).and_then(|p| p.epp),
-                        ) {
-                            if &now != epp {
-                                let _ = self.sys.set_epp(&base.policy, epp);
-                            }
+                        ) && &now != epp
+                        {
+                            let _ = self.sys.set_epp(&base.policy, epp);
                         }
                     } else {
                         touched = true;
@@ -419,11 +447,16 @@ impl Applier {
         }
         saved.touched_governor = touched;
         let mut detail = match want {
-            Some(g) => format!("{g} : {changed}/{total} politique(s) changée(s), {same} déjà bonne(s)"),
+            Some(g) => {
+                format!("{g} : {changed}/{total} politique(s) changée(s), {same} déjà bonne(s)")
+            }
             None => format!("base remise : {changed}/{total} politique(s), {same} déjà bonne(s)"),
         };
         if !unavailable.is_empty() {
-            detail.push_str(&format!(" ; non proposé, base gardée sur {}", unavailable.join(", ")));
+            detail.push_str(&format!(
+                " ; non proposé, base gardée sur {}",
+                unavailable.join(", ")
+            ));
         }
         if !errors.is_empty() {
             detail.push_str(&format!(" ; échecs : {}", errors.join(", ")));
@@ -445,7 +478,11 @@ impl Applier {
             return Action::new(K, S::Skipped, "non demandé : base M1 gardée");
         }
         let Some(base) = saved.thp.clone() else {
-            return Action::new(K, S::Skipped, "THP absent (noyau sans transparent hugepages)");
+            return Action::new(
+                K,
+                S::Skipped,
+                "THP absent (noyau sans transparent hugepages)",
+            );
         };
         let target = want.map(|t| t.as_str().to_string()).unwrap_or(base.clone());
         if self.sys.thp().as_deref() == Some(target.as_str()) {
@@ -456,7 +493,11 @@ impl Applier {
             return Action::new(K, S::Unchanged, format!("déjà {target}"));
         }
         if let Err(e) = self.sys.set_thp(&target) {
-            return Action::new(K, S::Error, format!("écriture de {target} impossible : {e}"));
+            return Action::new(
+                K,
+                S::Error,
+                format!("écriture de {target} impossible : {e}"),
+            );
         }
         let back = self.sys.thp();
         if back.as_deref() != Some(target.as_str()) {
@@ -479,12 +520,22 @@ impl Applier {
                 let had = self.pmqos.take().is_some();
                 let mut d = format!("aucune limite ajoutée ({})", base_label(base));
                 if want == Some(CStates::Deep) && base.is_some_and(|b| b != CStates::Deep) {
-                    d.push_str(" : la base M1 reste plus stricte, un profil ne peut qu'ajouter une limite");
+                    d.push_str(
+                        " : la base M1 reste plus stricte, un profil ne peut qu'ajouter une limite",
+                    );
                 }
                 if had {
-                    return Action::new(K, S::Restored, format!("limite du jeu précédent retirée ; {d}"));
+                    return Action::new(
+                        K,
+                        S::Restored,
+                        format!("limite du jeu précédent retirée ; {d}"),
+                    );
                 }
-                let st = if want.is_some() { S::Unchanged } else { S::Skipped };
+                let st = if want.is_some() {
+                    S::Unchanged
+                } else {
+                    S::Skipped
+                };
                 return Action::new(K, st, d);
             }
             Some(m) => m,
@@ -493,10 +544,14 @@ impl Applier {
             CStates::Poll => 0,
             _ => self.sys.shallow_latency_us(),
         };
-        if let Some(h) = &self.pmqos {
-            if h.us == us {
-                return Action::new(K, S::Unchanged, format!("{mode} : limite {us} µs déjà tenue"));
-            }
+        if let Some(h) = &self.pmqos
+            && h.us == us
+        {
+            return Action::new(
+                K,
+                S::Unchanged,
+                format!("{mode} : limite {us} µs déjà tenue"),
+            );
         }
         match self.sys.open_pmqos(us) {
             Ok(f) => {
@@ -510,13 +565,19 @@ impl Applier {
                 Action::new(
                     K,
                     S::Applied,
-                    format!("{mode} : limite {us} µs (latence effective {eff} ; {})", base_label(base)),
+                    format!(
+                        "{mode} : limite {us} µs (latence effective {eff} ; {})",
+                        base_label(base)
+                    ),
                 )
             }
             Err(e) => Action::new(
                 K,
                 S::Error,
-                format!("{} : {e} (C-states laissés à la base)", self.sys.pmqos_dev().display()),
+                format!(
+                    "{} : {e} (C-states laissés à la base)",
+                    self.sys.pmqos_dev().display()
+                ),
             ),
         }
     }
@@ -530,7 +591,11 @@ impl Applier {
             Mitigations::Off => "coupées (mitigations=off)",
         };
         Some(if want == run {
-            Action::new(K, S::Unchanged, format!("noyau déjà conforme : mitigations {kernel}"))
+            Action::new(
+                K,
+                S::Unchanged,
+                format!("noyau déjà conforme : mitigations {kernel}"),
+            )
         } else if want == Mitigations::Off {
             Action::new(
                 K,
@@ -581,8 +646,14 @@ impl Applier {
         let what = match eff.gpu_clocks.mode {
             GpuMode::Fixed => format!(
                 "fixed (core {} MHz, mem {} MHz)",
-                eff.gpu_clocks.core_mhz.map(|v| v.to_string()).unwrap_or("-".into()),
-                eff.gpu_clocks.mem_mhz.map(|v| v.to_string()).unwrap_or("-".into())
+                eff.gpu_clocks
+                    .core_mhz
+                    .map(|v| v.to_string())
+                    .unwrap_or("-".into()),
+                eff.gpu_clocks
+                    .mem_mhz
+                    .map(|v| v.to_string())
+                    .unwrap_or("-".into())
             ),
             m => m.to_string(),
         };
@@ -591,7 +662,11 @@ impl Applier {
                 if let Some(s) = self.saved.as_mut() {
                     s.gpu_applied = true;
                 }
-                Action::new(K, S::Applied, format!("{what} via le hook M9 {msg}").trim().to_string())
+                Action::new(
+                    K,
+                    S::Applied,
+                    format!("{what} via le hook M9 {msg}").trim().to_string(),
+                )
             }
             HookOutcome::Absent => Action::new(
                 K,
@@ -614,7 +689,11 @@ impl Applier {
         }
         match r {
             HookOutcome::Ok(_) => Action::new(K, S::Restored, "horloges de base remises (hook M9)"),
-            HookOutcome::Absent => Action::new(K, S::Error, "hook M9 disparu : horloges peut-être pas remises"),
+            HookOutcome::Absent => Action::new(
+                K,
+                S::Error,
+                "hook M9 disparu : horloges peut-être pas remises",
+            ),
             HookOutcome::Refused(m) | HookOutcome::Failed(m) => {
                 Action::new(K, S::Error, format!("remise des horloges : {m}"))
             }
@@ -638,7 +717,11 @@ impl Applier {
             out.push(self.apply_thp(None));
         }
         if self.pmqos.take().is_some() {
-            out.push(Action::new("cstates", S::Restored, format!("limite retirée ({})", base_label(self.sys.m1_cstates()))));
+            out.push(Action::new(
+                "cstates",
+                S::Restored,
+                format!("limite retirée ({})", base_label(self.sys.m1_cstates())),
+            ));
         }
         if saved.gpu_applied {
             out.push(self.gpu_restore());
@@ -649,10 +732,14 @@ impl Applier {
             .is_some_and(|s| !s.touched_governor && !s.touched_thp && !s.gpu_applied);
         if clean {
             self.saved = None;
-            if let Err(e) = fs::remove_file(&self.state_file) {
-                if e.kind() != io::ErrorKind::NotFound {
-                    out.push(Action::new("etat", S::Error, format!("{} : {e}", self.state_file.display())));
-                }
+            if let Err(e) = fs::remove_file(&self.state_file)
+                && e.kind() != io::ErrorKind::NotFound
+            {
+                out.push(Action::new(
+                    "etat",
+                    S::Error,
+                    format!("{} : {e}", self.state_file.display()),
+                ));
             }
         } else if let Some(a) = self.persist() {
             out.push(a);
@@ -682,7 +769,11 @@ pub mod fake {
                 let d = r.join(CPUFREQ).join(format!("policy{i}"));
                 fs::create_dir_all(&d).unwrap();
                 fs::write(d.join("scaling_governor"), format!("{g}\n")).unwrap();
-                fs::write(d.join("scaling_available_governors"), format!("{available}\n")).unwrap();
+                fs::write(
+                    d.join("scaling_available_governors"),
+                    format!("{available}\n"),
+                )
+                .unwrap();
                 fs::write(d.join("energy_performance_preference"), "performance\n").unwrap();
             }
             let t = r.join(THP);
@@ -692,11 +783,19 @@ pub mod fake {
             fs::create_dir_all(c.parent().unwrap()).unwrap();
             fs::write(&c, "1\n").unwrap();
             fs::create_dir_all(r.join("proc")).unwrap();
-            fs::write(r.join(CMDLINE), "BOOT_IMAGE=/vmlinuz root=/dev/x quiet threadirqs\n").unwrap();
+            fs::write(
+                r.join(CMDLINE),
+                "BOOT_IMAGE=/vmlinuz root=/dev/x quiet threadirqs\n",
+            )
+            .unwrap();
             fs::create_dir_all(r.join("etc/rago")).unwrap();
             fs::write(r.join(M1_CONF), "# M1\nRAGO_CSTATES=\"deep\"\n").unwrap();
             fs::create_dir_all(r.join("dev")).unwrap();
-            fs::write(r.join("dev/cpu_dma_latency"), PMQOS_DEFAULT_US.to_ne_bytes()).unwrap();
+            fs::write(
+                r.join("dev/cpu_dma_latency"),
+                PMQOS_DEFAULT_US.to_ne_bytes(),
+            )
+            .unwrap();
             fs::create_dir_all(r.join("hooks")).unwrap();
             fs::set_permissions(r.join("hooks"), fs::Permissions::from_mode(0o755)).unwrap();
             Self { dir }
@@ -707,7 +806,10 @@ pub mod fake {
         }
 
         pub fn system(&self) -> System {
-            System::new(self.root().to_path_buf(), self.root().join("dev/cpu_dma_latency"))
+            System::new(
+                self.root().to_path_buf(),
+                self.root().join("dev/cpu_dma_latency"),
+            )
         }
 
         pub fn hooks(&self) -> Hooks {
@@ -715,15 +817,31 @@ pub mod fake {
         }
 
         pub fn applier(&self) -> Applier {
-            Applier::new(self.system(), self.hooks(), self.root().join("run/applied.json"))
+            Applier::new(
+                self.system(),
+                self.hooks(),
+                self.root().join("run/applied.json"),
+            )
         }
 
         pub fn gov(&self, i: usize) -> String {
-            read_trim(&self.root().join(CPUFREQ).join(format!("policy{i}/scaling_governor"))).unwrap()
+            read_trim(
+                &self
+                    .root()
+                    .join(CPUFREQ)
+                    .join(format!("policy{i}/scaling_governor")),
+            )
+            .unwrap()
         }
 
         pub fn set_gov(&self, i: usize, g: &str) {
-            fs::write(self.root().join(CPUFREQ).join(format!("policy{i}/scaling_governor")), g).unwrap();
+            fs::write(
+                self.root()
+                    .join(CPUFREQ)
+                    .join(format!("policy{i}/scaling_governor")),
+                g,
+            )
+            .unwrap();
         }
 
         pub fn thp(&self) -> String {
@@ -749,7 +867,10 @@ mod tests {
     }
 
     fn status_of(a: &[Action], knob: &str) -> S {
-        a.iter().find(|x| x.knob == knob).unwrap_or_else(|| panic!("{knob} absent : {a:?}")).status
+        a.iter()
+            .find(|x| x.knob == knob)
+            .unwrap_or_else(|| panic!("{knob} absent : {a:?}"))
+            .status
     }
 
     #[test]
@@ -771,7 +892,8 @@ mod tests {
         assert_eq!(a.system().pmqos_effective(), Some(1));
         assert!(f.root().join("run/applied.json").exists());
         let saved: Saved =
-            serde_json::from_str(&fs::read_to_string(f.root().join("run/applied.json")).unwrap()).unwrap();
+            serde_json::from_str(&fs::read_to_string(f.root().join("run/applied.json")).unwrap())
+                .unwrap();
         assert_eq!(saved.governors[0].governor, "performance");
         assert_eq!(saved.thp.as_deref(), Some("madvise"));
         assert!(saved.touched_governor && saved.touched_thp);
@@ -934,7 +1056,10 @@ mod tests {
         assert!(a.saved().unwrap().gpu_applied);
         let r = a.restore();
         assert_eq!(status_of(&r, "gpu_clocks"), S::Restored, "{r:?}");
-        assert_eq!(fs::read_to_string(&log).unwrap(), "apply fixed 1800\nrestore  \n");
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            "apply fixed 1800\nrestore  \n"
+        );
     }
 
     #[test]
