@@ -33,13 +33,31 @@ finish() {
 	systemctl poweroff --no-block
 	exit 0
 }
-# Jeu factice : relève THP et la latence PM QoS effective pendant qu'il tourne.
-GAME="sed -n 's/.*\[\(.*\)\].*/\1/p' $THP > $OUT/thp; od -An -t d4 -N4 $QOS | tr -d ' ' > $OUT/qos"
 as() { # as <utilisateur> <commande…>
 	local u=$1
 	shift
 	runuser -u "$u" -- "$@"
 }
+# play <utilisateur> <nom> <commande de lancement…> : lance un jeu factice avec
+# « <commande de lancement…> -- sh -c … ». Pendant qu'il tourne, root relève THP
+# et la latence PM QoS effective (/dev/cpu_dma_latency est réservé à root) dans
+# $OUT/<nom>.thp et $OUT/<nom>.qos (absents si le jeu n'a pas démarré). Sortie
+# du launcher dans $OUT/<nom>.log ; code de sortie = celui du launcher.
+play() {
+	local u=$1 n=$2 lp
+	shift 2
+	rm -f "$OUT/$n".*
+	as "$u" "$@" -- sh -c "touch $OUT/$n.on; i=0; while [ ! -e $OUT/$n.go ] && [ \$i -lt 300 ]; do sleep 0.1; i=\$((i + 1)); done" > "$OUT/$n.log" 2>&1 &
+	lp=$!
+	for _ in $(seq 300); do [ -e "$OUT/$n.on" ] && break; sleep 0.1; done
+	if [ -e "$OUT/$n.on" ]; then
+		thp > "$OUT/$n.thp"
+		qos > "$OUT/$n.qos"
+	fi
+	touch "$OUT/$n.go"
+	wait "$lp"
+}
+got() { cat "$OUT/$1" 2>/dev/null; }
 
 for _ in $(seq 1 180); do
 	tuned-adm active >/dev/null 2>&1 && break
@@ -94,31 +112,32 @@ check_true "profil local validé" rago-profiled validate /etc/rago/profiles
 check_true "list : base communautaire + profil local" sh -c 'rago-profiled list 2>/dev/null | grep -q "^vm-test" && rago-profiled list 2>/dev/null | grep -q "^valorant"'
 
 # --- 3. un jeu (joueur non root) : surcharge pendant, base exacte après ------------------
-rm -f "$OUT/thp" "$OUT/qos"
-as joueur env SteamAppId=999999 rago-profiled launch -- sh -c "$GAME" > "$OUT/launch.log" 2>&1
-rc=$?
-check "jeu lancé par le joueur" 0 "$rc"
-check "pendant le jeu : THP" always "$(cat "$OUT/thp")"
-check "pendant le jeu : C-states poll (0 µs)" 0 "$(cat "$OUT/qos")"
+play joueur jeu1 env SteamAppId=999999 rago-profiled launch
+check "jeu lancé par le joueur" 0 "$?"
+check "pendant le jeu : THP" always "$(got jeu1.thp)"
+check "pendant le jeu : C-states poll (0 µs)" 0 "$(got jeu1.qos)"
 check "après le jeu : THP de M1" "$base_thp" "$(thp)"
 check "après le jeu : C-states de M1 (tuned)" "$base_qos" "$(qos)"
 check_true "après le jeu : tuned-adm verify" tuned-adm verify
-check_true "rapport : horloges GPU en attente de M9" grep -q "M9" "$OUT/launch.log"
-check_true "rapport : mitigations signalées, pas changées" grep -q "RAGO_MITIGATIONS=off" "$OUT/launch.log"
-check_true "rapport : rago-sched-hint (M0) absent signalé" grep -q "rago-sched-hint" "$OUT/launch.log"
-show < "$OUT/launch.log"
+check_true "rapport : horloges GPU en attente de M9" grep -q "M9" "$OUT/jeu1.log"
+check_true "rapport : mitigations signalées, pas changées" grep -q "RAGO_MITIGATIONS=off" "$OUT/jeu1.log"
+check_true "rapport : rago-sched-hint (M0) absent signalé" grep -q "rago-sched-hint" "$OUT/jeu1.log"
+show < "$OUT/jeu1.log"
 
 # --- 4. jeu sans profil : rien ne bouge ----------------------------------------------------
-as joueur rago-profiled launch --id inconnu -- sh -c "$GAME" > "$OUT/launch2.log" 2>&1
-check "repli : THP inchangé" "$base_thp" "$(cat "$OUT/thp")"
-check "repli : C-states inchangés" "$base_qos" "$(cat "$OUT/qos")"
-check_true "repli : signalé" grep -q "profil sûr par défaut" "$OUT/launch2.log"
+play joueur jeu2 rago-profiled launch --id inconnu
+check "repli : jeu lancé" 0 "$?"
+check "repli : THP inchangé" "$base_thp" "$(got jeu2.thp)"
+check "repli : C-states inchangés" "$base_qos" "$(got jeu2.qos)"
+check_true "repli : signalé" grep -q "profil sûr par défaut" "$OUT/jeu2.log"
 
 # --- 5. hors du groupe rago : refusé, le jeu se lance quand même sans surcharge -----------
-as autre rago-profiled launch --id vm-test -- sh -c "$GAME" > "$OUT/launch3.log" 2>&1
+play autre jeu3 rago-profiled launch --id vm-test
 check "hors groupe : jeu lancé quand même" 0 "$?"
-check "hors groupe : aucune surcharge" "$base_thp" "$(cat "$OUT/thp")"
-check_true "hors groupe : socket refusé" grep -q "injoignable" "$OUT/launch3.log"
+check "hors groupe : THP sans surcharge" "$base_thp" "$(got jeu3.thp)"
+check "hors groupe : C-states sans surcharge" "$base_qos" "$(got jeu3.qos)"
+check_true "hors groupe : socket refusé" grep -q "injoignable" "$OUT/jeu3.log"
+show < "$OUT/jeu3.log"
 
 # --- 6. service tué en plein jeu : systemd le relance, la base revient -------------------
 as joueur rago-profiled launch --id vm-test -- sleep 60 > "$OUT/launch4.log" 2>&1 &
