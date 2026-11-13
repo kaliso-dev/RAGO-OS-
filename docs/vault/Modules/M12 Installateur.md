@@ -1,7 +1,7 @@
 ---
 type: module
 tags: [module, phase-C]
-maj: 2026-11-12
+maj: 2026-11-13
 statut: À FAIRE
 ---
 # M12 Installateur
@@ -17,6 +17,11 @@ statut: À FAIRE
 - `installer/build_micro_windows.sh` — construit le micro-Windows depuis l'ISO fournie
 
 **Ce qu'il fait.** GPT : ESP, Rago A/B (LUKS), partition Windows native, RAGO-LIB (NTFS), RAGO-COMM (FAT32), partition données. Modes clean / migration. BYOL : demande l'ISO, construit via compile_micro_engine.ps1. Détecte 1 ou 2 NVMe.
+
+**Ce que les modules déjà codés lui demandent (13/11).**
+- [[M3 Chiffrement LUKS]] : volumes `rago-a`, `rago-b`, `rago-swap` (`setup_secure_encryption.sh format`), install dans le chroot du système cible, monté dans un espace de montage privé ; passphrase par un fichier en mode 600.
+- **TPM au premier démarrage**, pas depuis l'installateur : un jeton TPM pris pendant l'installation ne vaut que si l'installateur démarre par la même chaîne que le système installé (PCR 7), ce qui n'arrivera presque jamais (clé USB signée Microsoft / shim contre systemd-boot signé par la clé MOK de la machine). Vu dans la VM de [[M4 Updates A-B]] : refusé, passphrase demandée. Donc au premier démarrage : passphrase de secours demandée une fois, puis `sudo rago-update setup` (UKI signée, jetons TPM sur la vraie chaîne).
+- [[M0 Noyau scx_rago]] + [[M4 Updates A-B]] : ESP montée en `/boot` (`RAGO_ESP`), systemd-boot installé puis signé et entrée `rago.conf` (`build_rago_kernel.sh bootloader`, avant M4 : en mode A/B il n'écrit plus `rago.conf`), clé MOK inscrite (MokManager) ; `rago-update setup` se lance sur la machine installée, démarrée par `rago.conf`.
 
 **Dépend de / relié à :** [[M0 Noyau scx_rago]], [[M3 Chiffrement LUKS]], [[M4 Updates A-B]], [[M5 Micro-Windows]], [[M6 Fast OS Switch]], [[M13 Build ISO]]
 

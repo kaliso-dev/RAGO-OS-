@@ -19,7 +19,9 @@ statut: À FAIRE
 
 **À installer pour M14 (13/11).** `/usr/bin/rago-profiled`, `host/systemd/rago-profiled.service` (activé), `profiles/community/` → `/usr/share/rago/profiles/`, `/etc/rago/profiles/`, `/usr/lib/rago/hooks/` : voir `daemons/rago-profiled/install.sh`.
 
-**Dépend de / relié à :** [[M12 Installateur]], [[Architecture]]
+**Pour M4 (13/11).** Paquets : `systemd-ukify` (avec python-pefile), systemd-boot et son systemd-stub, `sbsigntools`, `rsync`, `openssl`, `tpm2-tools`. `rago-update` (`host/manage_atomic_updates.sh`) se met en place sur la machine installée, après M0 + M3 (`setup`). Plus tard, les mises à jour par image (`rago-update apply --image`) attendent une archive tar signée d'une racine, produite ici ; la clé qui la signe n'est pas décidée ([[Questions ouvertes]]). Détail : [[M4 Updates A-B]].
+
+**Dépend de / relié à :** [[M12 Installateur]], [[Architecture]], [[M4 Updates A-B]]
 
 **Critère de test.** ISO boote, hardware_check OK, installateur se lance.
 
