@@ -1,0 +1,14 @@
+# Rago OS — remet cap_sys_nice sur gamescope après chaque mise à jour (module M2).
+# Marqueur : rago-proton-layer
+# Sans elle, --rt (temps réel du compositeur) et la file GPU prioritaire de la
+# session Rago sont sans effet. Installé dans /etc/pacman.d/hooks/.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/bin/gamescope
+
+[Action]
+Description = Rago OS : cap_sys_nice sur gamescope (session plein écran)
+When = PostTransaction
+Exec = /usr/bin/setcap cap_sys_nice=eip /usr/bin/gamescope

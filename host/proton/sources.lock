@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — versions épinglées de la couche Proton (module M2).
+#
+# Format : <nom> <version> <url> <empreinte>
+#   empreinte = sha512:<hex> | sha256:<hex> | PENDING
+# Une empreinte « PENDING » n'a jamais été vérifiée : setup_proton_layer.sh
+# refuse de l'installer (le composant est sauté, avec un avertissement).
+#
+# Pour épingler (un mainteneur, avec accès à GitHub, puis commit de ce fichier) :
+#   host/setup_proton_layer.sh lock [--proton-ge GE-ProtonX-Y] [--heroic vX.Y.Z]
+# `lock` lit la release (la dernière si rien n'est donné), télécharge chaque
+# fichier, vérifie Proton-GE contre le .sha512sum publié, et écrit l'empreinte
+# ici. Ensuite, chaque installation part des mêmes octets.
+#
+# Proton-GE : https://github.com/GloriousEggroll/proton-ge-custom (archive .tar.gz,
+#   installée dans /usr/share/steam/compatibilitytools.d/<version>/).
+# Heroic : https://github.com/Heroic-Games-Launcher/HeroicGamesLauncher
+#   (paquet .pacman pour Arch / base Rago, .deb pour Debian / Ubuntu).
+# Version : À ÉPINGLER (GitHub inaccessible depuis l'environnement de Claude le 13/11/2026).
+
+proton-ge PENDING PENDING PENDING
+heroic-pacman PENDING PENDING PENDING
+heroic-deb PENDING PENDING PENDING

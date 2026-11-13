@@ -1,7 +1,7 @@
 ---
 type: index
 tags: [index]
-maj: 2026-11-12
+maj: 2026-11-13
 ---
 # Rago OS : le projet
 

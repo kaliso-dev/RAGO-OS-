@@ -11,8 +11,8 @@ Ordre de build (un module à la fois, testé avant le suivant) :
 1. **[[M0 Noyau scx_rago]]** — noyau custom signé + ordonnanceur. Le fondement. **Code écrit (13/11), en attente du test sur matériel.**
 2. [[M1 Tuning hôte]] — **code écrit (13/11), testé en VM, en attente du test sur matériel** — puis [[M14 Profils par jeu]] (tôt, car M2/M5 l'utilisent) — **code écrit (13/11), testé en conteneur, sur le vrai noyau du conteneur et en VM ; hooks M9 / M5-M6 en attente ; en attente du test sur matériel.**
 
-Décision du 13/11 : tant qu'il n'y a pas de machine de test, on avance sur les modules testables sans matériel dédié, un à la fois ; chacun reste « jamais testé sur matériel » jusqu'au test de Sofiene. [[M2 Couche Proton]] attend son feu vert.
-3. [[M2 Couche Proton]] · [[M3 Chiffrement LUKS]] · [[M4 Updates A-B]].
+Décision du 13/11 : tant qu'il n'y a pas de machine de test, on avance sur les modules testables sans matériel dédié, un à la fois ; chacun reste « jamais testé sur matériel » jusqu'au test de Sofiene.
+3. [[M2 Couche Proton]] — **code écrit (13/11), testé en conteneur et en chroot Ubuntu 25.10 avec les vrais paquets ; Proton-GE / Heroic à épingler ; affichage, VRR, HDR, FPS en attente du test sur matériel** — · [[M3 Chiffrement LUKS]] · [[M4 Updates A-B]] (prochain module : à choisir par Sofiene).
 4. [[M5 Micro-Windows]] · [[M6 Fast OS Switch]] · [[M7 Bibliothèque partagée]] · [[M8 Optimisation switch]].
 5. [[M9 GPU]] · [[M10 Télémétrie]] · [[M11 Rago UI]] · [[M12 Installateur]] · [[M13 Build ISO]].
 

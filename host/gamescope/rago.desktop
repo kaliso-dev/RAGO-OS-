@@ -1,0 +1,9 @@
+# Rago OS — entrée de session pour le gestionnaire de connexion (module M2).
+# Marqueur : rago-proton-layer
+[Desktop Entry]
+Name=Rago OS (jeu plein écran)
+Comment=Steam en mode Big Picture dans gamescope, comme une console
+Exec=/usr/bin/rago-session
+TryExec=/usr/bin/gamescope
+Type=Application
+DesktopNames=gamescope
