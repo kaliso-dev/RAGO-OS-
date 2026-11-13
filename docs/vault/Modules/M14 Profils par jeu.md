@@ -23,7 +23,7 @@ statut: EN COURS
 - `profiles/README.md` — format, règles, contrat des hooks, contribution.
 - `profiles/schema/rago-profile.schema.json` — schéma JSON ; `profiles/schema/exemple-complet.toml` — modèle commenté.
 - `profiles/community/` — base communautaire : `counter-strike-2.toml`, `cyberpunk-2077.toml`, `elden-ring.json` (couche proton), `valorant.toml`, `fortnite.json` (couche switch). Toutes `verified = false`.
-- Tests : `daemons/rago-profiled/src/*.rs` (unitaires), `daemons/rago-profiled/tests/cli.rs` (intégration), `daemons/rago-profiled/tests/real_kernel_test.sh` (vrai noyau, root), `daemons/rago-profiled/tests/vm/run_m14_vm_test.sh` + `daemons/rago-profiled/tests/vm/m14_vm_guest.sh` (VM), `profiles/tests/test_schema.py` + `profiles/tests/invalides/` (schéma).
+- Tests : `daemons/rago-profiled/tests/run_tests.sh` (lance tout ce qui tourne sans matériel), `daemons/rago-profiled/src/*.rs` (unitaires), `daemons/rago-profiled/tests/cli.rs` (intégration), `daemons/rago-profiled/tests/real_kernel_test.sh` (vrai noyau, root), `daemons/rago-profiled/tests/vm/run_m14_vm_test.sh` + `daemons/rago-profiled/tests/vm/m14_vm_guest.sh` (VM), `profiles/tests/test_schema.py` + `profiles/tests/invalides/` (schéma).
 
 ## Ce qu'il fait
 - **Profil** = `{ id, couche proton|switch, cpu_governor, thp madvise|always, cstates deep|shallow|poll, sched_hint, gpu_clocks, mitigations on|off, windows_security compat_max|perf }` + `match` (steam_appid, exe), `anticheat`, `verified`, `notes`. Un champ absent = garder la base de M1. Détail : `profiles/README.md`.
