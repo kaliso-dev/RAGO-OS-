@@ -388,26 +388,27 @@ rago_pl_compat_tool_name() {
 # Puis « -- » et la commande de Steam (RAGO_SESSION_STEAM_CMD).
 rago_pl_gamescope_args() {
 	local a
-	echo "-e" # intégration Steam (focus, overlay, réglages de la session)
-	echo "--xwayland-count"; echo 2
-	[ -n "${RAGO_SESSION_WIDTH:-}" ] && { echo "-W"; echo "$RAGO_SESSION_WIDTH"; }
-	[ -n "${RAGO_SESSION_HEIGHT:-}" ] && { echo "-H"; echo "$RAGO_SESSION_HEIGHT"; }
-	[ -n "${RAGO_SESSION_REFRESH:-}" ] && { echo "-r"; echo "$RAGO_SESSION_REFRESH"; }
-	[ "${RAGO_SESSION_VRR:-1}" = 1 ] && echo "--adaptive-sync"
-	[ "${RAGO_SESSION_HDR:-1}" = 1 ] && echo "--hdr-enabled"
-	[ "${RAGO_SESSION_HDR:-1}" = 1 ] && [ "${RAGO_SESSION_HDR_ITM:-0}" = 1 ] && echo "--hdr-itm-enable"
-	[ "${RAGO_SESSION_TEARING:-1}" = 1 ] && echo "--immediate-flips"
-	[ "${RAGO_SESSION_RT:-1}" = 1 ] && echo "--rt"
-	[ "${RAGO_SESSION_MANGOAPP:-1}" = 1 ] && echo "--mangoapp"
-	[ -n "${RAGO_SESSION_OUTPUT:-}" ] && { echo "-O"; echo "$RAGO_SESSION_OUTPUT"; }
-	[ -n "${RAGO_SESSION_VK_DEVICE:-}" ] && { echo "--prefer-vk-device"; echo "$RAGO_SESSION_VK_DEVICE"; }
-	[ -n "${RAGO_SESSION_BACKEND:-}" ] && { echo "--backend"; echo "$RAGO_SESSION_BACKEND"; }
-	[ "${RAGO_SESSION_NESTED:-0}" = 1 ] && echo "-f"
+	# printf et non echo : « echo -e » n'affiche rien.
+	printf '%s\n' "-e" # intégration Steam (focus, overlay, réglages de la session)
+	printf '%s\n' "--xwayland-count"; echo 2
+	[ -n "${RAGO_SESSION_WIDTH:-}" ] && { printf '%s\n' "-W"; printf '%s\n' "$RAGO_SESSION_WIDTH"; }
+	[ -n "${RAGO_SESSION_HEIGHT:-}" ] && { printf '%s\n' "-H"; printf '%s\n' "$RAGO_SESSION_HEIGHT"; }
+	[ -n "${RAGO_SESSION_REFRESH:-}" ] && { printf '%s\n' "-r"; printf '%s\n' "$RAGO_SESSION_REFRESH"; }
+	[ "${RAGO_SESSION_VRR:-1}" = 1 ] && printf '%s\n' "--adaptive-sync"
+	[ "${RAGO_SESSION_HDR:-1}" = 1 ] && printf '%s\n' "--hdr-enabled"
+	[ "${RAGO_SESSION_HDR:-1}" = 1 ] && [ "${RAGO_SESSION_HDR_ITM:-0}" = 1 ] && printf '%s\n' "--hdr-itm-enabled"
+	[ "${RAGO_SESSION_TEARING:-1}" = 1 ] && printf '%s\n' "--immediate-flips"
+	[ "${RAGO_SESSION_RT:-1}" = 1 ] && printf '%s\n' "--rt"
+	[ "${RAGO_SESSION_MANGOAPP:-1}" = 1 ] && printf '%s\n' "--mangoapp"
+	[ -n "${RAGO_SESSION_OUTPUT:-}" ] && { printf '%s\n' "-O"; printf '%s\n' "$RAGO_SESSION_OUTPUT"; }
+	[ -n "${RAGO_SESSION_VK_DEVICE:-}" ] && { printf '%s\n' "--prefer-vk-device"; printf '%s\n' "$RAGO_SESSION_VK_DEVICE"; }
+	[ -n "${RAGO_SESSION_BACKEND:-}" ] && { printf '%s\n' "--backend"; printf '%s\n' "$RAGO_SESSION_BACKEND"; }
+	[ "${RAGO_SESSION_NESTED:-0}" = 1 ] && printf '%s\n' "-f"
 	# shellcheck disable=SC2086  # découpage voulu : options libres de l'utilisateur
-	for a in ${RAGO_SESSION_EXTRA_ARGS:-}; do echo "$a"; done
-	echo "--"
+	for a in ${RAGO_SESSION_EXTRA_ARGS:-}; do printf '%s\n' "$a"; done
+	printf '%s\n' "--"
 	# shellcheck disable=SC2086
-	for a in ${RAGO_SESSION_STEAM_CMD:-steam -gamepadui}; do echo "$a"; done
+	for a in ${RAGO_SESSION_STEAM_CMD:-steam -gamepadui}; do printf '%s\n' "$a"; done
 }
 
 # Environnement de Steam dans la session (une variable par ligne). Les

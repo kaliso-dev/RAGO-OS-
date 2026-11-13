@@ -126,8 +126,8 @@ if [ "$SHADER" = 1 ]; then
 	# Capture Fossilize hors Steam (Steam capture déjà les siens) si la couche
 	# Vulkan de Fossilize est installée.
 	if [ "$CAPTURE" = 1 ] && [ -z "$appid" ]; then
-		for j in /usr/share/vulkan/explicit_layer.d/*ossilize*.json /etc/vulkan/explicit_layer.d/*ossilize*.json; do
-			[ -r "$j" ] || continue
+		for j in ${RAGO_VK_LAYER_DIRS:-/usr/share/vulkan/explicit_layer.d /etc/vulkan/explicit_layer.d}; do
+			compgen -G "$j/*ossilize*.json" >/dev/null || continue
 			put_env FOSSILIZE_DUMP_PATH "$gdir/fossilize/rago"
 			if [ -z "${VK_LOADER_LAYERS_ENABLE:-}" ]; then
 				put_env VK_LOADER_LAYERS_ENABLE "VK_LAYER_fossilize"
@@ -198,11 +198,7 @@ if [ "$MANGOHUD_ON" = 1 ]; then
 	elif [ "${MANGOHUD:-0}" = 1 ] || [[ "${LD_PRELOAD:-}" == *MangoHud* ]]; then
 		:
 	elif mh=$(command -v mangohud 2>/dev/null); then
-		udir="${XDG_CONFIG_HOME:-$HOME/.config}/MangoHud"
-		rconf=${RAGO_MANGOHUD_CONF:-/usr/share/rago/mangohud/MangoHud.conf}
-		if [ -z "${MANGOHUD_CONFIGFILE:-}" ] && [ -r "$rconf" ] && ! compgen -G "$udir/*.conf" >/dev/null; then
-			put_env MANGOHUD_CONFIGFILE "$rconf"
-		fi
+		# Réglage du HUD : ~/.config/MangoHud/ du joueur, sinon /etc/MangoHud.conf (Rago).
 		wrap+=("$mh")
 	else
 		info "mangohud absent : jeu lancé sans HUD"

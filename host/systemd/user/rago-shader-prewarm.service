@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — pré-chauffage des shaders en fond (module M2). Marqueur : rago-proton-layer
+#
+# Service utilisateur, démarré par la session Rago (rago-session). Rejoue les
+# bases Fossilize des jeux pas encore pré-chauffées pour ce GPU et ce pilote,
+# au plus bas niveau de priorité, et se met en pause tout seul tant qu'un jeu
+# lancé par rago-launch tourne. Journal : journalctl --user -u rago-shader-prewarm
+
+[Unit]
+Description=Rago OS : pré-chauffage des shaders (Fossilize)
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/rago-shader-cache prewarm --wait-games
+# Code 4 = fossilize-replay pas encore là (Steam le fournit après son premier démarrage).
+SuccessExitStatus=4
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
