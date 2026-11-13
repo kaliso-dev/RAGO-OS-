@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — ordonnanceur d'entrées/sorties par type de disque (module M1).
+# Marqueur : rago-host-tuning. Installé dans /etc/udev/rules.d/ par
+# host/setup_host_tuning.sh (qui remplace @NVME_SCHED@ par none ou mq-deadline).
+#
+#   NVMe              -> @NVME_SCHED@ (none : le SSD gère ses files lui-même)
+#   SSD SATA / eMMC   -> mq-deadline (léger, latence bornée)
+#   Disque dur (HDD)  -> bfq (le bureau et le jeu restent fluides pendant
+#                        une grosse copie)
+# Seuls les disques entiers sont touchés (pas les partitions).
+
+ACTION!="add|change", GOTO="rago_iosched_end"
+SUBSYSTEM!="block", GOTO="rago_iosched_end"
+ENV{DEVTYPE}!="disk", GOTO="rago_iosched_end"
+
+KERNEL=="nvme[0-9]*n[0-9]*", ATTR{queue/scheduler}="@NVME_SCHED@", GOTO="rago_iosched_end"
+KERNEL=="sd[a-z]*|mmcblk[0-9]*|vd[a-z]*", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline", GOTO="rago_iosched_end"
+KERNEL=="sd[a-z]*", ATTR{queue/rotational}=="1", ATTR{queue/scheduler}="bfq"
+
+LABEL="rago_iosched_end"
