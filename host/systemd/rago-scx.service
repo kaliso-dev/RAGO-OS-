@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — ordonnanceur scx_rago (module M0).
+#
+# Charge scx_rago (sched_ext) au démarrage et ouvre le canal launcher
+# /run/rago/sched-hint.sock (root:rago, 0660) utilisé par rago-sched-hint.
+#
+# Filet de sécurité : si scx_rago s'arrête, plante ou est éjecté par le
+# watchdog sched_ext, le noyau revient tout seul à EEVDF + BORE. systemd le
+# relance (au plus 3 fois en 2 minutes) ; au-delà, la machine reste sur
+# EEVDF + BORE et les jeux se lancent quand même (rago-sched-hint le signale).
+#
+# Options machine : /etc/rago/scx.conf, par exemple
+#   RAGO_SCX_ARGS="--rago-topo x3d --rago-game-cpus 0-7,16-23"
+
+[Unit]
+Description=Rago OS : ordonnanceur de jeu scx_rago (sched_ext)
+Documentation=file:///usr/share/doc/rago/RAGO_FORK.md
+After=local-fs.target
+# Un seul ordonnanceur sched_ext à la fois.
+Conflicts=scx_loader.service scx.service
+ConditionPathIsDirectory=/sys/kernel/sched_ext
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/rago/scx.conf
+# --performance : mode performance de lavd (pas d'économie d'énergie pendant le jeu).
+ExecStart=/usr/bin/scx_rago --performance $RAGO_SCX_ARGS
+# SIGINT : arrêt propre (désinscription sched_ext, suppression du socket).
+KillSignal=SIGINT
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=rago
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=no
+
+# Droits : chargement BPF et struct_ops (CAP_SYS_ADMIN, CAP_BPF, CAP_PERFMON),
+# mémoire verrouillée (CAP_SYS_RESOURCE), groupe du socket (CAP_CHOWN),
+# lecture de /proc des processus du joueur (CAP_DAC_READ_SEARCH, CAP_SYS_PTRACE
+# pour /proc/<pid>/task), affinité des tâches (CAP_SYS_NICE).
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_BPF CAP_PERFMON CAP_SYS_RESOURCE CAP_CHOWN CAP_FOWNER CAP_DAC_READ_SEARCH CAP_SYS_PTRACE CAP_SYS_NICE
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+# Priorité élevée : l'ordonnanceur ne doit pas lui-même attendre.
+Nice=-10
+OOMScoreAdjust=-900
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

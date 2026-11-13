@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — sources épinglées du noyau (module M0).
+#
+# Format : <nom> <url> <sha256>
+#   - le tarball noyau et la config de base sont téléchargés et vérifiés ;
+#   - les fichiers « *.patch » sont appliqués dans l'ordre de ce fichier,
+#     puis les patchs locaux de kernel/patches/local/ (ordre alphabétique).
+#
+# Un sha256 « PENDING » n'a jamais été vérifié : `fetch` refuse de l'utiliser.
+# Pour épingler (premier téléchargement, à faire par un mainteneur, puis
+# commit du fichier) :
+#   ./kernel/build_rago_kernel.sh lock --patches-ref <commit> --config-ref <commit>
+# `lock` remplace @PATCHES_REF@ (dépôt CachyOS/kernel-patches) et
+# @CONFIG_REF@ (dépôt CachyOS/linux-cachyos) par les commits, télécharge
+# chaque fichier et écrit son sha256 ici. Ensuite, tout build part des mêmes octets.
+#
+# Base : 6.18 (LTS). Patchset CachyOS : dépôt CachyOS/kernel-patches
+# (base « all » + ordonnanceur BORE) et config du paquet linux-cachyos.
+# Version et commit : À VÉRIFIER au moment de l'épinglage (le patchset doit
+# viser exactement la même version mineure que le tarball).
+
+KERNEL_VERSION=6.18.44
+PATCHES_REF=@PATCHES_REF@
+CONFIG_REF=@CONFIG_REF@
+
+linux-6.18.44.tar.xz https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.44.tar.xz PENDING
+config-cachyos https://raw.githubusercontent.com/CachyOS/linux-cachyos/@CONFIG_REF@/linux-cachyos/config PENDING
+0001-cachyos-base-all.patch https://raw.githubusercontent.com/CachyOS/kernel-patches/@PATCHES_REF@/6.18/all/0001-cachyos-base-all.patch PENDING
+0002-bore-cachy.patch https://raw.githubusercontent.com/CachyOS/kernel-patches/@PATCHES_REF@/6.18/sched/0001-bore-cachy.patch PENDING
