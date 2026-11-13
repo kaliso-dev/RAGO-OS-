@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0
+# Rago OS — mises à jour A/B (module M4) : démarrage d'essai tombé en mode de
+# secours (emergency / rescue) : on le note puis on redémarre ; l'essai étant
+# à usage unique (systemd-boot), le slot précédent démarre. Activé seulement
+# pendant un essai, par rago-update-generator. Marqueur : rago-atomic-updates
+[Unit]
+Description=Rago OS : démarrage d'essai en échec, retour au slot précédent
+DefaultDependencies=no
+After=local-fs-pre.target
+# Réglages de la section [Unit] : sous [Service], systemd les ignore (« Unknown
+# key name ») et la machine reste en mode de secours (vu dans la VM de M4).
+SuccessAction=reboot-force
+FailureAction=reboot-force
+
+[Service]
+Type=oneshot
+ExecStart=-/usr/lib/rago/manage_atomic_updates.sh trial-failed
+# Le script ne retient jamais le redémarrage : passé ce délai, il est arrêté,
+# le service échoue et FailureAction= redémarre quand même.
+TimeoutStartSec=60
+StandardOutput=journal+console

@@ -1,0 +1,45 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — mises à jour A/B (module M4) : générateur systemd. Pendant un
+# démarrage d'essai (la racine porte la marque d'essai écrite par rago-update
+# ET systemd-boot a démarré cette entrée-là), arme le chien de garde :
+#   - multi-user.target doit être atteint en RAGO_AB_TRIAL_TIMEOUT secondes,
+#     sinon redémarrage forcé ;
+#   - emergency / rescue : rago-update-trial-failed.service (note + redémarrage).
+# Au redémarrage, l'entrée d'essai (à usage unique) est consommée : systemd-boot
+# démarre le défaut, le dernier slot bon connu = retour arrière automatique.
+# Hors essai : ne fait rien. Marqueur : rago-atomic-updates
+set -u
+out=${1:-/run/systemd/generator}
+efivars=${RAGO_EFIVARS:-/sys/firmware/efi/efivars}
+conf=${RAGO_UPDATE_CONF:-/etc/rago/update.conf}
+state=${RAGO_UPDATE_STATE:-/var/lib/rago/update/state}
+guid=4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+
+[ -f "$conf" ] || exit 0
+val() { # val <fichier> <clé>
+	sed -n "s/^[[:space:]]*$2=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}[[:space:]]*\$/\1/p" "$1" 2>/dev/null | tail -1
+}
+trial=$(val "$state" RAGO_UPD_TRIAL)
+[ -n "$trial" ] || exit 0
+f="$efivars/LoaderEntrySelected-$guid"
+[ -r "$f" ] || exit 0
+# Variable EFI : 4 octets d'attributs puis UTF-16LE terminé par NUL.
+sel=$(od -An -v -t u1 -j 4 "$f" 2>/dev/null | awk '{ for (i = 1; i <= NF; i++) b[c++] = $i }
+	END { for (i = 0; i + 1 < c; i += 2) { if (b[i] == 0 && b[i + 1] == 0) break; if (b[i + 1] == 0) printf "%c", b[i] } }')
+[ "$sel" = "$trial" ] || exit 0
+
+t=$(val "$conf" RAGO_AB_TRIAL_TIMEOUT)
+case "$t" in '' | *[!0-9]*) t=900 ;; esac
+mkdir -p "$out/multi-user.target.d" "$out/emergency.target.wants" "$out/rescue.target.wants"
+cat > "$out/multi-user.target.d/50-rago-update-trial.conf" <<CONF
+# Rago OS (M4) : démarrage d'essai de $sel. Pas de multi-user.target en
+# $t s = redémarrage forcé, puis retour au dernier slot bon connu.
+[Unit]
+JobTimeoutSec=$t
+JobTimeoutAction=reboot-force
+CONF
+ln -sf /usr/lib/systemd/system/rago-update-trial-failed.service "$out/emergency.target.wants/rago-update-trial-failed.service"
+ln -sf /usr/lib/systemd/system/rago-update-trial-failed.service "$out/rescue.target.wants/rago-update-trial-failed.service"
+exit 0
