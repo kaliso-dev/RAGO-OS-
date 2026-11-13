@@ -834,10 +834,45 @@ step_open() {
 	run "$scs" attach "$name" "$dev" none "$opts" || die "ouverture refusée"
 }
 
+# Pourquoi un volume ouvert ne se ferme pas : ce qui s'appuie dessus (holders) et
+# où il est encore monté, y compris dans l'espace de montage privé d'un service
+# (systemd-udevd, systemd-logind… reçoivent une copie des montages faits après
+# leur démarrage).
+explain_busy() { # explain_busy <nom>
+	local dm mm p mp ns seen=" "
+	dm=$(basename "$(readlink -f "/dev/mapper/$1" 2>/dev/null)")
+	mm=$(cat "$SYS/class/block/$dm/dev" 2>/dev/null) || return 0
+	p=$(names_of "$SYS/class/block/$dm/holders"/* | tr '\n' ' ')
+	[ -z "$p" ] || warn "$1 porte encore : $p"
+	for p in "$PROC"/[0-9]*; do
+		ns=$(readlink "$p/ns/mnt" 2>/dev/null) || continue
+		case "$seen" in *" $ns "*) continue ;; esac
+		mp=$(awk -v mm="$mm" '$3 == mm { print $5; exit }' "$p/mountinfo" 2>/dev/null || true)
+		[ -n "$mp" ] || continue
+		seen="$seen$ns "
+		warn "$1 encore monté sur $mp (vu par le processus ${p##*/} : $(cat "$p/comm" 2>/dev/null))"
+	done
+}
+
 step_close() {
 	need_root close
 	[ -n "$o_name" ] || die "close : --name obligatoire"
-	run cryptsetup close "$o_name"
+	if [ "$dry_run" = 1 ]; then
+		printf '[dry-run] cryptsetup close %s\n' "$o_name"
+		return 0
+	fi
+	local i rc=0
+	# Juste après un démontage, udev peut encore lire le volume : on attend.
+	if have udevadm; then udevadm settle 2>/dev/null || true; fi
+	for i in 1 2 3 4 5; do
+		rc=0
+		if [ "$i" -lt 5 ]; then cryptsetup close "$o_name" 2>/dev/null || rc=$?; else cryptsetup close "$o_name" || rc=$?; fi
+		[ "$rc" = 0 ] && return 0
+		[ "$rc" = 5 ] || break # 5 : encore utilisé ; autre code : inutile de réessayer
+		[ "$i" = 5 ] || sleep 1
+	done
+	[ "$rc" = 5 ] && explain_busy "$o_name"
+	die "close : $o_name ne se ferme pas (cryptsetup, code $rc)"
 }
 
 # =====================================================================================

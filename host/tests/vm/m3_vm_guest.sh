@@ -12,6 +12,15 @@
 #   rago-part  disque avec partitions (doit être refusé)
 set -u
 
+# Tout ce que ce test monte reste dans son propre espace de montage. Sinon
+# systemd-udevd (PrivateMounts=yes) et systemd-logind (ProtectSystem=strict)
+# reçoivent une copie de /mnt et de ses sous-montages, qu'un démontage depuis ici
+# ne retire pas toujours : le volume reste « utilisé » et ne se ferme plus (vu au
+# 2e passage de ce test ; reproduit exprès en phase 2 ci-dessous).
+if [ -z "${RAGO_M3_PRIVATE_NS:-}" ]; then
+	RAGO_M3_PRIVATE_NS=1 exec unshare --mount --propagation private "$0" "$@"
+fi
+
 H=/opt/rago-m3/host
 S=$H/setup_secure_encryption.sh
 PASSF=/root/m3pass
@@ -291,6 +300,23 @@ case "$phase" in
 	expect_rc "open avec une mauvaise passphrase refusé" 1
 	enc --virtual-only --device "$D_S" --role swap --yes --passphrase-file "$PASSF" format
 	expect_rc "refus : formater le swap en service" 1
+
+	# close quand un service garde une copie du montage : on refait exprès, dans
+	# l'espace de montage de la machine (PID 1), le démontage qui fuit (rbind + rslave).
+	enc --device "$D_B" --name t-leak open
+	mkfs.ext4 -q -F -L rago-b-fs /dev/mapper/t-leak
+	nsenter -t 1 -m sh -c 'mount /dev/mapper/t-leak /mnt && mkdir -p /mnt/dev && mount --rbind /dev /mnt/dev && mount --make-rslave /mnt/dev && umount -R /mnt/dev && umount /mnt'
+	enc --name t-leak close
+	expect_rc "close : refusé tant qu'un service garde le montage" 1
+	expect_out "close : dit où le volume est encore monté (espace d'un service)" 't-leak encore monté sur /mnt \(vu par le processus [0-9]+ : '
+	show 'encore monté' 4
+	mm=$(cat "/sys/class/block/$(basename "$(readlink -f /dev/mapper/t-leak)")/dev")
+	for p in /proc/[0-9]*; do
+		grep -q " $mm " "$p/mountinfo" 2>/dev/null || continue
+		nsenter -t "${p#/proc/}" -m sh -c 'umount -R /mnt/dev; umount /mnt' 2>/dev/null
+	done
+	enc --name t-leak close
+	expect_rc "close : fermé une fois les copies démontées" 0
 
 	# Hibernation vers le swap chiffré, puis reprise (démarrage 3).
 	info "logind CanHibernate : $(busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanHibernate 2>&1)"
