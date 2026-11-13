@@ -175,7 +175,20 @@ if command -v mokutil >/dev/null; then
 else
 	fail "mokutil absent"
 fi
-if command -v sbverify >/dev/null && [ -f "$MOK_DIR/MOK.crt" ] && [ -f "$KERNEL_IMG" ]; then
+if rago_ab_mode "${RAGO_UPDATE_CONF:-/etc/rago/update.conf}"; then
+	# Mode A/B (M4) : le noyau est embarqué dans l'UKI signée du slot démarré.
+	esp=$(rago_conf_get "${RAGO_KERNEL_CONF:-/etc/rago/kernel.conf}" RAGO_ESP /boot)
+	sel=$(od -An -v -t u1 -j 4 /sys/firmware/efi/efivars/LoaderEntrySelected-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f 2>/dev/null |
+		awk '{ for (i = 1; i <= NF; i++) b[c++] = $i } END { for (i = 0; i + 1 < c; i += 2) { if (b[i] == 0 && b[i + 1] == 0) break; if (b[i + 1] == 0) printf "%c", b[i] } }')
+	uki="$esp/EFI/Linux/$sel"
+	if [ -z "$sel" ] || [ ! -f "$uki" ]; then
+		fail "mode A/B : UKI démarrée introuvable (${sel:-LoaderEntrySelected absente}) : rago-update status"
+	elif command -v sbverify >/dev/null && [ -f "$MOK_DIR/MOK.crt" ] && sbverify --cert "$MOK_DIR/MOK.crt" "$uki" >/dev/null 2>&1; then
+		pass "mode A/B : UKI démarrée $sel signée par la clé MOK (sbverify)"
+	else
+		fail "mode A/B : UKI $sel non signée par la clé MOK (ou sbverify / MOK.crt manquant)"
+	fi
+elif command -v sbverify >/dev/null && [ -f "$MOK_DIR/MOK.crt" ] && [ -f "$KERNEL_IMG" ]; then
 	if sbverify --cert "$MOK_DIR/MOK.crt" "$KERNEL_IMG" >/dev/null 2>&1; then
 		pass "$KERNEL_IMG signé par la clé MOK (sbverify)"
 	else
