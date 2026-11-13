@@ -1,14 +1,14 @@
 ---
 type: pilotage
 tags: [pilotage]
-maj: 2026-11-12
+maj: 2026-11-13
 ---
 # Prochaines étapes
 
 Retour à [[Projet]]. Voir [[État actuel]].
 
 Ordre de build (un module à la fois, testé avant le suivant) :
-1. **[[M0 Noyau scx_rago]]** — noyau custom signé + ordonnanceur. Le fondement.
+1. **[[M0 Noyau scx_rago]]** — noyau custom signé + ordonnanceur. Le fondement. **Code écrit (13/11), en attente du test sur matériel.**
 2. [[M1 Tuning hôte]] puis [[M14 Profils par jeu]] (tôt, car M2/M5 l'utilisent).
 3. [[M2 Couche Proton]] · [[M3 Chiffrement LUKS]] · [[M4 Updates A-B]].
 4. [[M5 Micro-Windows]] · [[M6 Fast OS Switch]] · [[M7 Bibliothèque partagée]] · [[M8 Optimisation switch]].
