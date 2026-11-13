@@ -235,10 +235,12 @@ read_pass_file() {
 	PASS=${PASS%$'\r'}
 }
 
+# Un terminal est-il vraiment là ? (/dev/tty existe toujours, mais ne s'ouvre
+# pas sans terminal de contrôle : service, installateur, setsid.)
+have_tty() { { true < /dev/tty && true > /dev/tty; } 2>/dev/null; }
+
 tty_read_secret() { # tty_read_secret <invite> -> REPLY
-	if ! { [ -r /dev/tty ] && [ -w /dev/tty ]; }; then
-		die "pas de terminal pour taper la passphrase (--passphrase-file pour l'installateur)"
-	fi
+	have_tty || die "pas de terminal pour taper la passphrase (--passphrase-file pour l'installateur)"
 	printf '%s' "$1" > /dev/tty
 	IFS= read -r -s REPLY < /dev/tty || REPLY=""
 	printf '\n' > /dev/tty
@@ -261,6 +263,7 @@ get_new_pass() {
 		read_pass_file "$o_passfile"
 	else
 		local p1
+		have_tty || die "pas de terminal pour taper la passphrase (--passphrase-file pour l'installateur)"
 		printf 'Passphrase de secours : %d caractères au moins. Elle déverrouille le disque\n' "$RAGO_PASS_MIN" > /dev/tty
 		printf 'quand le TPM refuse (mise à jour du BIOS, Secure Boot changé). Note-la en lieu sûr.\n' > /dev/tty
 		tty_read_secret "Passphrase de secours : "
@@ -361,11 +364,32 @@ dev_by_uuid() {
 	echo "$d"
 }
 
-luks_dump() { cryptsetup luksDump "$1" 2>/dev/null; }
+# Toujours code 0 (vide si ce n'est pas du LUKS) : utilisables dans $(…).
+luks_dump() { cryptsetup luksDump "$1" 2>/dev/null || true; }
 
-enroll_list() { systemd-cryptenroll "$1" 2>/dev/null | rago_enroll_list_parse; }
+enroll_list() { { systemd-cryptenroll "$1" 2>/dev/null || true; } | rago_enroll_list_parse; }
 
 sysblock() { echo "$SYS/class/block/$(basename "$(readlink -f "$1")")"; }
+
+# Noms des chemins qui existent (un motif sans correspondance ne donne rien).
+# Toujours code 0 : utilisable dans $(…) avec set -e / pipefail.
+names_of() {
+	local p
+	for p in "$@"; do
+		if [ -e "$p" ]; then echo "${p##*/}"; fi
+	done
+}
+
+# Partitions d'un disque : « <dossier sysfs> <nom> » -> noms des partitions.
+parts_of() {
+	local p
+	for p in "$1"/"$2"*; do
+		if [ -e "$p/partition" ]; then echo "${p##*/}"; fi
+	done
+}
+
+# Premier volume sous un volume device-mapper (dm-0 -> vda2).
+first_slave() { names_of "$SYS/class/block/$1"/slaves/* | head -1; }
 
 # Refuse tout volume qui sert ou qui contient des données encore utilisées.
 # Toujours appliqué, même avec --yes.
@@ -378,28 +402,26 @@ check_device_safe() {
 	if [ "$o_virtual" = 1 ]; then
 		rago_dev_is_virtual "$sb" || die "$dev n'est pas un disque virtuel (mode --virtual-only : loop, virtio, QEMU seulement)"
 	fi
-	mnt=$(lsblk -nrpo NAME,MOUNTPOINT "$real" 2>/dev/null | awk '$2 != "" { print $1 " sur " $2 }' | head -3)
+	mnt=$(lsblk -nrpo NAME,MOUNTPOINT "$real" 2>/dev/null | awk '$2 != "" { print $1 " sur " $2 }' | head -3 || true)
 	[ -z "$mnt" ] || die "$dev (ou une de ses partitions) est monté : $mnt"
 	if awk 'NR > 1 { print $1 }' "$PROC/swaps" 2>/dev/null | xargs -r readlink -f | grep -qx "$real"; then
 		die "$dev est un swap actif (swapoff d'abord)"
 	fi
-	holders=$(for h in "$sb"/holders/*; do [ -e "$h" ] && basename "$h"; done | tr '\n' ' ')
+	holders=$(names_of "$sb"/holders/* | tr '\n' ' ')
 	[ -z "$holders" ] || die "$dev est utilisé par : $holders(volume ouvert, LVM, RAID ?)"
-	parts=$(for p in "$sb"/"$name"*; do [ -e "$p/partition" ] && basename "$p"; done 2>/dev/null | tr '\n' ' ')
+	parts=$(parts_of "$sb" "$name" | tr '\n' ' ')
 	[ -z "$parts" ] || die "$dev est un disque entier qui a des partitions ($parts) : donne la partition à chiffrer"
 	return 0
 }
 
 confirm_wipe() {
 	local dev=$1 sig
-	sig=$(blkid -p -o export "$dev" 2>/dev/null | awk -F= '$1 == "TYPE" || $1 == "LABEL" || $1 == "PTTYPE" { printf "%s=%s ", $1, $2 }')
+	sig=$(blkid -p -o export "$dev" 2>/dev/null | awk -F= '$1 == "TYPE" || $1 == "LABEL" || $1 == "PTTYPE" { printf "%s=%s ", $1, $2 }' || true)
 	if [ -n "$sig" ]; then
 		warn "$dev contient déjà : $sig"
 	fi
 	if [ "$o_yes" = 1 ]; then return 0; fi
-	if ! { [ -r /dev/tty ] && [ -w /dev/tty ]; }; then
-		die "pas de terminal pour confirmer : --yes (installateur) si c'est voulu"
-	fi
+	have_tty || die "pas de terminal pour confirmer : --yes (installateur) si c'est voulu"
 	printf 'TOUT le contenu de %s sera effacé définitivement.\n' "$dev" > /dev/tty
 	printf 'Pour confirmer, tape le chemin du périphérique (%s) : ' "$dev" > /dev/tty
 	local ans
@@ -453,7 +475,7 @@ read_pcrs() {
 secure_boot_state() { # -> on | off | ?
 	local f="$SYS/firmware/efi/efivars/SecureBoot-$EFI_GLOBAL" b
 	[ -r "$f" ] || { echo "?"; return 0; }
-	b=$(od -An -t u1 -j 4 -N 1 "$f" 2>/dev/null | tr -d ' ')
+	b=$(od -An -t u1 -j 4 -N 1 "$f" 2>/dev/null | tr -d ' ' || true)
 	if [ "$b" = 1 ]; then echo on; else echo off; fi
 }
 
@@ -606,13 +628,13 @@ version_ge() { # version_ge <a> <b> : a >= b ?
 check_tools() {
 	local v gen kmap
 	if have cryptsetup; then
-		v=$(cryptsetup --version 2>/dev/null | awk '{ print $2 }')
+		v=$(cryptsetup --version 2>/dev/null | awk '{ print $2 }' || true)
 		if version_ge "$v" 2.4; then ok "cryptsetup $v (LUKS2, argon2id, jetons)"; else ko "cryptsetup $v : 2.4 au moins (jetons TPM2)"; fi
 	else
 		ko "cryptsetup absent (sudo $0 deps)"
 	fi
 	if have systemd-cryptenroll; then
-		v=$(systemd-cryptenroll --version 2>/dev/null | awk 'NR == 1 { print $2 }')
+		v=$(systemd-cryptenroll --version 2>/dev/null | awk 'NR == 1 { print $2 }' || true)
 		if version_ge "${v:-0}" 250; then ok "systemd-cryptenroll (systemd $v)"; else ko "systemd $v : 250 au moins"; fi
 	else
 		ko "systemd-cryptenroll absent"
@@ -922,7 +944,7 @@ mounted_root_luks_uuid() {
 	src=$(findmnt -no SOURCE / 2>/dev/null || true)
 	case "$src" in /dev/mapper/* | /dev/dm-*) ;; *) return 1 ;; esac
 	name=$(basename "$(readlink -f "$src")")
-	dev=$(for h in "$SYS/class/block/$name"/slaves/*; do [ -e "$h" ] && basename "$h"; done | head -1)
+	dev=$(first_slave "$name")
 	[ -n "$dev" ] || return 1
 	luks_uuid "/dev/$dev"
 }
@@ -1243,8 +1265,9 @@ verify_live() {
 	local src name slave u swapdev res mm
 	src=$(findmnt -no SOURCE / 2>/dev/null || true)
 	name=$(basename "$(readlink -f "$src" 2>/dev/null)")
-	slave=$(for h in "$SYS/class/block/$name"/slaves/*; do [ -e "$h" ] && basename "$h"; done | head -1)
-	u=$( [ -n "$slave" ] && luks_uuid "/dev/$slave")
+	slave=$(first_slave "$name")
+	u=""
+	[ -z "$slave" ] || u=$(luks_uuid "/dev/$slave")
 	if [ -n "$u" ] && [ "$u" = "$(this_root_uuid)" ]; then ok "racine : $src sur le volume chiffré du slot ${SLOT:-a}"; else ko "racine : $src n'est pas le volume chiffré du slot ${SLOT:-a}"; fi
 	[ -n "$SWAP_UUID" ] || return 0
 	swapdev=$(readlink -f "/dev/mapper/$RAGO_MAP_SWAP" 2>/dev/null || true)
@@ -1254,7 +1277,8 @@ verify_live() {
 		ko "swap chiffré /dev/mapper/$RAGO_MAP_SWAP pas actif"
 	fi
 	res=$(cat "$SYS/power/resume" 2>/dev/null || true)
-	mm=$( [ -n "$swapdev" ] && cat "$SYS/class/block/$(basename "$swapdev")/dev" 2>/dev/null)
+	mm=""
+	[ -z "$swapdev" ] || mm=$(cat "$SYS/class/block/$(basename "$swapdev")/dev" 2>/dev/null || true)
 	if [ -n "$mm" ] && [ "$res" = "$mm" ]; then ok "hibernation : resume depuis le swap chiffré ($res)"; else att "hibernation : /sys/power/resume = ${res:-?} (swap chiffré : ${mm:-?})"; fi
 	awk 'NR > 1 { print $1 }' "$PROC/swaps" | while read -r s; do
 		case "$s" in /dev/zram* | /dev/dm-* | /dev/mapper/*) ;; *) echo "$s" ;; esac
@@ -1270,6 +1294,8 @@ verify_pcrs() {
 	if [ -s "$cur" ]; then
 		changed=$(rago_pcr_changed <(grep -v '^#' "$f") "$cur")
 		if [ -z "$changed" ]; then ok "PCR $PCRS identiques à l'enrôlement"; else ko "PCR $changed changés depuis l'enrôlement (mise à jour firmware / Secure Boot) : sudo rago-encryption reseal"; fi
+	else
+		skip "PCR actuels illisibles : comparaison avec l'enrôlement impossible"
 	fi
 	rm -f "$cur"
 }
@@ -1280,18 +1306,22 @@ step_verify() {
 	n_ok=0 n_fail=0 n_warn=0 n_boot=0 n_skip=0
 	printf 'Rago OS — vérification du chiffrement (M3)\n'
 	if is_ours "$R$P_CONF"; then ok "réglages : $P_CONF (slot ${SLOT:-?})"; else ko "réglages : $P_CONF absent (install)"; bilan; return; fi
-	if [ -z "$R" ]; then
-		[ -n "$ROOT_A_UUID" ] && verify_volume "slot A" "$ROOT_A_UUID"
-		[ -n "$ROOT_B_UUID" ] && verify_volume "slot B" "$ROOT_B_UUID"
-		[ -n "$SWAP_UUID" ] && verify_volume "swap" "$SWAP_UUID"
-	fi
+	# Volumes : toujours sur le système vivant ; avec --root (installateur,
+	# tests), ceux qui sont branchés.
+	local role u
+	for role in "slot A" "slot B" "swap"; do
+		case "$role" in "slot A") u=$ROOT_A_UUID ;; "slot B") u=$ROOT_B_UUID ;; *) u=$SWAP_UUID ;; esac
+		[ -n "$u" ] || continue
+		if [ -n "$R" ] && ! dev_by_uuid "$u" >/dev/null 2>&1; then skip "$role : volume UUID=$u pas branché (--root)"; continue; fi
+		verify_volume "$role" "$u"
+	done
 	verify_crypttab
 	verify_initramfs_conf
 	verify_initramfs_images
 	verify_cmdline
+	verify_pcrs
 	if [ -z "$R" ]; then
 		verify_live
-		verify_pcrs
 		cpu_report ok att
 		case "$(secure_boot_state)" in
 		on) ok "Secure Boot actif" ;;
