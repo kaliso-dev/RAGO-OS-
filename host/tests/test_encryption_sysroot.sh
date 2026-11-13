@@ -152,9 +152,34 @@ check "fstab : racine gardée" 1 "$(grep -c '^/dev/mapper/rago-root / ext4' "$fs
 check "fstab : autre swap du joueur gardé" 1 "$(grep -c '^/data/swapfile' "$fs")"
 
 dc="$R1/etc/dracut.conf.d/90-rago-encryption.conf"
-check "dracut : modules (i18n : clavier fr pour la passphrase)" 'add_dracutmodules+=" systemd crypt systemd-cryptsetup tpm2-tss resume i18n "' "$(grep '^add_dracutmodules' "$dc")"
+check "dracut : modules (i18n : clavier fr pour la passphrase)" 'add_dracutmodules+=" systemd crypt systemd-cryptsetup tpm2-tss resume rago-crypttab i18n "' "$(grep '^add_dracutmodules' "$dc")"
 check "dracut : racine et swap dans l'initramfs" "add_device+=\" /dev/disk/by-uuid/$UA /dev/disk/by-uuid/$US \"" "$(grep '^add_device' "$dc")"
-check "dracut : crypttab dans l'image" 'install_items+=" /etc/crypttab "' "$(grep '^install_items' "$dc")"
+check "dracut : pas toute la crypttab dans l'image" 0 "$(grep -c '^install_items' "$dc")"
+dm="$R1/usr/lib/dracut/modules.d/91rago-crypttab/module-setup.sh"
+check "dracut : module rago-crypttab installé" "ok" "$(cmp -s "$here/../dracut/91rago-crypttab/module-setup.sh" "$dm" && [ -x "$dm" ] && echo ok)"
+ci="$R1/etc/crypttab.initramfs"
+check "crypttab.initramfs : rago-root" "rago-root  UUID=$UA none $OPTS" "$(grep '^rago-root ' "$ci")"
+check "crypttab.initramfs : rago-swap" "rago-swap  UUID=$US none $OPTS" "$(grep '^rago-swap ' "$ci")"
+check "crypttab.initramfs : pas le volume « data » du joueur" 0 "$(grep -c '^data ' "$ci")"
+check "crypttab.initramfs : mode 600" 600 "$(mode "$ci")"
+
+# Le module dracut, appelé comme dracut l'appelle (initdir = image en cours).
+dmod() { # dmod <racine> <image> : lance check() puis install()
+	bash -c '. "$1"; dracutsysrootdir=$2 initdir=$3; check; echo "check=$?"; install; echo "install=$?"' _ "$dm" "$1" "$2"
+}
+mkdir -p "$tmp/img1"
+check "module : check = seulement si demandé (255)" "check=255" "$(dmod "$R1" "$tmp/img1" | grep '^check=')"
+dmod "$R1" "$tmp/img1" > /dev/null
+check "module : non hostonly -> crypttab Rago seule" "ok" "$(cmp -s "$ci" "$tmp/img1/etc/crypttab" && echo ok)"
+check "module : crypttab de l'image en 600" 600 "$(mode "$tmp/img1/etc/crypttab")"
+# hostonly : le module crypt a déjà écrit sa crypttab filtrée (racine + un volume utile).
+mkdir -p "$tmp/img2/etc"
+printf 'luks-%s UUID=%s none luks\nhome UUID=44444444-0000-4000-8000-000000000000 none luks\n' "$UA" "$UA" > "$tmp/img2/etc/crypttab"
+dmod "$R1" "$tmp/img2" > /dev/null
+check "module hostonly : entrée du module crypt pour le même volume remplacée" 0 "$(grep -c "^luks-$UA" "$tmp/img2/etc/crypttab")"
+check "module hostonly : autre volume gardé" 1 "$(grep -c '^home ' "$tmp/img2/etc/crypttab")"
+check "module hostonly : rago-root et rago-swap" 2 "$(grep -c -e '^rago-root ' -e '^rago-swap ' "$tmp/img2/etc/crypttab")"
+check "module : sans crypttab.initramfs, pas inclus" "check=1" "$(dmod "$tmp/vide" "$tmp/img3" 2>/dev/null | grep '^check=')"
 check "dracut : fichier valide pour bash" "ok" "$(bash -n "$dc" && echo ok)"
 
 kc="$R1/etc/rago/kernel.conf"
@@ -200,7 +225,9 @@ check "verify --root (code)" 0 "$rc"
 has "verify : crypttab rago-root" '\[ OK \] +crypttab : rago-root' "$out"
 has "verify : crypttab rago-swap" '\[ OK \] +crypttab : rago-swap' "$out"
 has "verify : fstab" '\[ OK \] +fstab : swap /dev/mapper/rago-swap' "$out"
-has "verify : dracut" '\[ OK \] +dracut : ' "$out"
+has "verify : dracut" '\[ OK \] +dracut : /etc/dracut' "$out"
+has "verify : module dracut" '\[ OK \] +dracut : module rago-crypttab' "$out"
+has "verify : crypttab.initramfs" '\[ OK \] +crypttab.initramfs : rago-swap' "$out"
 has "verify : root= dans kernel.conf" '\[ OK \] +/etc/rago/kernel.conf : root=/dev/mapper/rago-root' "$out"
 has "verify : resume= dans kernel.conf" '\[ OK \] +/etc/rago/kernel.conf : resume=/dev/mapper/rago-swap' "$out"
 has "verify : bilan sans échec" 'Bilan : [0-9]+ OK, 0 échec' "$out"

@@ -251,14 +251,15 @@ check "drop-in sourcé après mkinitcpio.conf" "base systemd keyboard sd-vconsol
 
 # --- dracut -------------------------------------------------------------------------------
 mkdir -p "$tmp/dracut/modules.d/10systemd" "$tmp/dracut/modules.d/70crypt" "$tmp/dracut/modules.d/71systemd-cryptsetup" \
-	"$tmp/dracut/modules.d/73tpm2-tss" "$tmp/dracut/modules.d/74resume" "$tmp/dracut/modules.d/20i18n" "$tmp/dracut/modules.d/90kernel-modules"
+	"$tmp/dracut/modules.d/73tpm2-tss" "$tmp/dracut/modules.d/74resume" "$tmp/dracut/modules.d/20i18n" "$tmp/dracut/modules.d/90kernel-modules" \
+	"$tmp/dracut/modules.d/91rago-crypttab"
 touch "$tmp/dracut/modules.d/README"
 mods=$(rago_dracut_modules "$tmp/dracut/modules.d")
-check "modules dracut (dracut 110)" "systemd i18n crypt systemd-cryptsetup tpm2-tss resume kernel-modules" "$mods"
+check "modules dracut (dracut 110)" "systemd i18n crypt systemd-cryptsetup tpm2-tss resume kernel-modules rago-crypttab" "$mods"
 conf=$(rago_dracut_conf "$mods" "$U1" "$U2" 1)
-check "dracut : modules" 'add_dracutmodules+=" systemd crypt systemd-cryptsetup tpm2-tss resume i18n "' "$(grep '^add_dracutmodules' <<<"$conf")"
+check "dracut : modules" 'add_dracutmodules+=" systemd crypt systemd-cryptsetup tpm2-tss resume rago-crypttab i18n "' "$(grep '^add_dracutmodules' <<<"$conf")"
 check "dracut : volumes" "add_device+=\" /dev/disk/by-uuid/$U1 /dev/disk/by-uuid/$U2 \"" "$(grep '^add_device' <<<"$conf")"
-check "dracut : crypttab" 'install_items+=" /etc/crypttab "' "$(grep '^install_items' <<<"$conf")"
+check "dracut : pas toute la crypttab dans l'image" 0 "$(grep -c '^install_items' <<<"$conf")"
 check "dracut : marqueur" 1 "$(grep -c "$RAGO_ENC_MARKER" <<<"$conf")"
 conf2=$(rago_dracut_conf "systemd crypt resume" "$U1" "" 0)
 check "dracut ancien (sans systemd-cryptsetup / tpm2-tss)" 'add_dracutmodules+=" systemd crypt resume "' "$(grep '^add_dracutmodules' <<<"$conf2")"
@@ -266,7 +267,7 @@ check "dracut sans swap" "add_device+=\" /dev/disk/by-uuid/$U1 \"" "$(grep '^add
 check "dracut sans clavier : pas d'i18n" 0 "$(grep -c i18n <<<"$(rago_dracut_conf "$mods" "$U1" "" 0 | grep '^add_dracut')")"
 # Le fichier se lit comme dracut le lit (bash) : variables valides.
 printf '%s\n' "$conf" > "$tmp/d.conf"
-check "dracut : fichier sourcé" " systemd crypt systemd-cryptsetup tpm2-tss resume i18n " \
+check "dracut : fichier sourcé" " systemd crypt systemd-cryptsetup tpm2-tss resume rago-crypttab i18n " \
 	"$(bash -c 'add_dracutmodules=""; . "$1"; echo "$add_dracutmodules"' _ "$tmp/d.conf")"
 
 # --- contenu de l'initramfs ------------------------------------------------------------

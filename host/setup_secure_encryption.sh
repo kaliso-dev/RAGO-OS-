@@ -88,8 +88,10 @@ done
 
 SRC_UNIT_SVC="$here/systemd/rago-tpm-check.service"
 SRC_UNIT_TIMER="$here/systemd/rago-tpm-check.timer"
+SRC_DRACUT_MOD="$here/dracut/91rago-crypttab/module-setup.sh"
 [ -f "$SRC_UNIT_SVC" ] || SRC_UNIT_SVC=/usr/lib/systemd/system/rago-tpm-check.service
 [ -f "$SRC_UNIT_TIMER" ] || SRC_UNIT_TIMER=/usr/lib/systemd/system/rago-tpm-check.timer
+[ -f "$SRC_DRACUT_MOD" ] || SRC_DRACUT_MOD=/usr/lib/dracut/modules.d/91rago-crypttab/module-setup.sh
 
 # Chemins sur la machine cible (sans la racine).
 P_CONF=/etc/rago/encryption.conf
@@ -99,6 +101,7 @@ P_CRYPTTAB=/etc/crypttab
 P_CRYPTTAB_INITRAMFS=/etc/crypttab.initramfs
 P_FSTAB=/etc/fstab
 P_DRACUT=/etc/dracut.conf.d/90-rago-encryption.conf
+P_DRACUT_MOD=/usr/lib/dracut/modules.d/91rago-crypttab/module-setup.sh
 P_MKINIT=/etc/mkinitcpio.conf.d/90-rago-encryption.conf
 P_LIBDIR=/usr/lib/rago
 P_BIN=/usr/bin/rago-encryption
@@ -1006,11 +1009,11 @@ install_crypttab() {
 		fi
 		rago_crypttab_merge "$R$P_CRYPTTAB" "${lines[@]}"
 	} | put_file "$P_CRYPTTAB" 0600
-	if [ "$GEN" = mkinitcpio ]; then
-		log "crypttab de l'initramfs : $P_CRYPTTAB_INITRAMFS"
-		backup_once "$P_CRYPTTAB_INITRAMFS"
-		rago_crypttab_merge "$R$P_CRYPTTAB_INITRAMFS" "${lines[@]}" | put_file "$P_CRYPTTAB_INITRAMFS" 0600
-	fi
+	# Crypttab de l'initramfs (sd-encrypt de mkinitcpio, module rago-crypttab de
+	# dracut) : les volumes du démarrage seulement, pas ceux du joueur.
+	log "crypttab de l'initramfs : $P_CRYPTTAB_INITRAMFS"
+	backup_once "$P_CRYPTTAB_INITRAMFS"
+	rago_crypttab_merge "$R$P_CRYPTTAB_INITRAMFS" "${lines[@]}" | put_file "$P_CRYPTTAB_INITRAMFS" 0600
 }
 
 install_fstab_swap() {
@@ -1031,7 +1034,10 @@ install_initramfs_conf() {
 		case " $mods " in *" systemd "*) ;; *) die "dracut sans module systemd : pas de TPM2 dans l'initramfs" ;; esac
 		case " $mods " in *" tpm2-tss "*) ;; *) warn "module dracut tpm2-tss absent : le TPM ne sera pas dans l'initramfs" ;; esac
 		[ -x "$R/usr/bin/tpm2" ] || [ "$apply" = 0 ] || die "tpm2-tools absent : dracut n'ajouterait pas le TPM à l'initramfs (sudo $0 deps)"
-		log "dracut : $P_DRACUT"
+		[ -f "$SRC_DRACUT_MOD" ] || die "module dracut rago-crypttab introuvable ($SRC_DRACUT_MOD)"
+		log "dracut : $P_DRACUT, module rago-crypttab"
+		put_file "$P_DRACUT_MOD" 0755 < "$SRC_DRACUT_MOD"
+		mods="$mods rago-crypttab"
 		rago_dracut_conf "$mods" "$THIS_ROOT" "$SWAP_UUID" "$kbd" | put_file "$P_DRACUT" 0644
 		;;
 	mkinitcpio)
@@ -1190,8 +1196,13 @@ verify_crypttab() {
 		[ "$3" = none ] || [ "$3" = - ] || ko "crypttab : $name a un fichier de clé ($3) : il contournerait le TPM"
 		bad=$(rago_crypttab_bad_options "$opts")
 		[ -z "$bad" ] || ko "crypttab : $name a l'option « $bad » : le volume serait effacé à chaque démarrage (image d'hibernation perdue)"
-		if [ "$GEN" = mkinitcpio ]; then
-			if rago_crypttab_entry "$R$P_CRYPTTAB_INITRAMFS" "$name" >/dev/null; then ok "crypttab.initramfs : $name"; else ko "crypttab.initramfs : pas d'entrée $name"; fi
+		e=$(rago_crypttab_entry "$R$P_CRYPTTAB_INITRAMFS" "$name" || true)
+		if [ -z "$e" ]; then
+			ko "crypttab.initramfs : pas d'entrée $name (relancer install)"
+		else
+			# shellcheck disable=SC2086  # découpage voulu
+			set -- $e
+			if [ "$2" = "UUID=$u" ] || [ "$2" = "/dev/disk/by-uuid/$u" ]; then ok "crypttab.initramfs : $name"; else ko "crypttab.initramfs : $name vise $2 (attendu UUID=$u)"; fi
 		fi
 	done
 	if [ -n "$SWAP_UUID" ]; then
@@ -1207,7 +1218,8 @@ verify_initramfs_conf() {
 	local h why
 	case "$GEN" in
 	dracut)
-		if is_ours "$R$P_DRACUT"; then ok "dracut : $P_DRACUT"; else ko "dracut : $P_DRACUT absent (install)"; fi ;;
+		if is_ours "$R$P_DRACUT"; then ok "dracut : $P_DRACUT"; else ko "dracut : $P_DRACUT absent (install)"; fi
+		if [ -f "$R$P_DRACUT_MOD" ]; then ok "dracut : module rago-crypttab"; else ko "dracut : module rago-crypttab absent (install)"; fi ;;
 	mkinitcpio)
 		if is_ours "$R$P_MKINIT"; then ok "mkinitcpio : $P_MKINIT"; else ko "mkinitcpio : $P_MKINIT absent (install)"; fi
 		h=$(mkinitcpio_hooks_effective)

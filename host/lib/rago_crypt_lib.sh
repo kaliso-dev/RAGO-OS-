@@ -430,10 +430,11 @@ rago_mkinitcpio_dropin() {
 # Contenu de /etc/dracut.conf.d/90-rago-encryption.conf.
 #   rago_dracut_conf <modules disponibles (liste)> <uuid racine> <uuid swap ou ""> <clavier 0|1>
 # Les modules demandés qui n'existent pas dans cette version de dracut sont
-# omis (dracut refuse un module inconnu).
+# omis (dracut refuse un module inconnu). rago-crypttab (host/dracut/) met
+# /etc/crypttab.initramfs dans l'image : seulement les volumes du démarrage.
 rago_dracut_conf() {
 	local avail=" $1 " root=$2 swap=$3 kbd=$4 m mods="" devs
-	for m in systemd crypt systemd-cryptsetup tpm2-tss resume; do
+	for m in systemd crypt systemd-cryptsetup tpm2-tss resume rago-crypttab; do
 		case "$avail" in *" $m "*) mods="$mods $m" ;; esac
 	done
 	if [ "$kbd" = 1 ]; then
@@ -444,13 +445,12 @@ rago_dracut_conf() {
 	printf '# Rago OS — chiffrement LUKS2 + TPM2 (module M3). Marqueur : %s\n' "$RAGO_ENC_MARKER"
 	printf '# Écrit par host/setup_secure_encryption.sh install ; ne pas modifier à la main.\n'
 	printf '# systemd dans l'"'"'initramfs : systemd-cryptsetup (TPM2 puis passphrase de secours),\n'
-	printf '# swap déchiffré AVANT le resume de l'"'"'hibernation (Fast OS Switch, M6).\n'
+	printf '# swap déchiffré AVANT le resume de l'"'"'hibernation (Fast OS Switch, M6) ;\n'
+	printf '# rago-crypttab : /etc/crypttab.initramfs devient la crypttab de l'"'"'image.\n'
 	printf 'add_dracutmodules+=" %s "\n' "${mods# }"
 	printf '# Volumes ouverts dans l'"'"'initramfs même hors détection « hostonly » (chroot de\n'
 	printf '# l'"'"'installateur, swap pas encore actif).\n'
 	printf 'add_device+=" %s "\n' "$devs"
-	printf '# crypttab complète si dracut ne la filtre pas (mode non hostonly).\n'
-	printf 'install_items+=" /etc/crypttab "\n'
 }
 
 # Modules dracut disponibles dans <dossier modules.d> : « 90crypt » -> « crypt ».
