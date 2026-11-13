@@ -1,0 +1,7 @@
+# Rust
+/target/
+# Build noyau
+/kernel/build/
+/kernel/out/
+# Journal de la dernière VM de test (--keep)
+/kernel/tests/vm/last_vm_console.log
