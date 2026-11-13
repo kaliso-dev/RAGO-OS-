@@ -1,0 +1,11 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — mises à jour A/B (module M4) : avant une hibernation, si le système
+# n'a pas démarré par l'entrée par défaut (essai en cours, ou slot choisi au
+# menu), le prochain démarrage doit reprendre sur la MÊME entrée : l'image
+# d'hibernation n'est valable que pour le noyau (et la racine) qui l'a écrite.
+# Appelé par systemd-sleep : <pre|post> <suspend|hibernate|hybrid-sleep|suspend-then-hibernate>.
+# Marqueur : rago-atomic-updates
+[ -f /etc/rago/update.conf ] || exit 0
+exec /usr/lib/rago/manage_atomic_updates.sh --quiet sleep-hook "$1" "$2"

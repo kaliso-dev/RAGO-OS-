@@ -47,6 +47,15 @@
 #   RAGO_CMDLINE="root=..."      base de la ligne de commande
 #   RAGO_ESP=/boot               montage de l'ESP (systemd-boot)
 #
+# Mode A/B (module M4, /etc/rago/update.conf écrit par « rago-update setup ») :
+# le slot en marche ne se modifie jamais. « install » se lance dans le slot
+# INACTIF, que rago-update écrit puis essaie au redémarrage :
+#   sudo rago-update apply --clone --bind <dépôt> --run "<dépôt>/kernel/build_rago_kernel.sh install"
+# Le noyau nu n'y est plus signé ni posé sur l'ESP (signé, il démarrerait avec
+# n'importe quelle initramfs) : rago-update l'embarque dans l'UKI signée du
+# slot. « bootloader » signe systemd-boot puis reconstruit l'UKI du slot en
+# marche (rago-update uki) au lieu d'écrire l'entrée rago.conf.
+#
 # Aucun contournement d'anti-triche : le noyau est signé avec la clé du
 # propriétaire de la machine, inscrite par lui dans le MOK, Secure Boot actif.
 set -euo pipefail
@@ -65,6 +74,7 @@ OUT="${RAGO_OUT_DIR:-$here/out}"
 DL="$BUILD/downloads"
 CONF_FILE="${RAGO_KERNEL_CONF:-/etc/rago/kernel.conf}"
 MOK_DIR="${RAGO_MOK_DIR:-/etc/rago/secureboot}"
+UPDATE_CONF="${RAGO_UPDATE_CONF:-/etc/rago/update.conf}"
 PKGBASE=linux-rago
 LOCALVERSION=-rago
 
@@ -479,6 +489,14 @@ write_default_conf() {
 
 esp_dir() { rago_conf_get "$CONF_FILE" RAGO_ESP /boot; }
 
+# Mode A/B de M4 ; et sommes-nous dans le slot inactif que rago-update écrit
+# (apply --run : variable RAGO_UPDATE_TARGET_SLOT) ?
+ab_mode() { rago_ab_mode "$UPDATE_CONF"; }
+in_update_target() { [ -n "${RAGO_UPDATE_TARGET_SLOT:-}" ]; }
+ab_install_hint() {
+	printf '  sudo rago-update apply --clone --bind %s --run "%s/build_rago_kernel.sh install"\n' "$repo" "$here"
+}
+
 # Signe un binaire EFI avec la clé MOK, en place, puis vérifie.
 sbsign_file() {
 	local f=$1
@@ -496,6 +514,12 @@ sbsign_file() {
 # --- install ---------------------------------------------------------------------------
 step_install() {
 	need_root install
+	if ab_mode && ! in_update_target; then
+		warn "mode A/B (M4) : le slot en marche ne se modifie pas. Le noyau s'installe dans le slot"
+		warn "inactif, essayé au redémarrage (retour automatique s'il ne démarre pas) :"
+		ab_install_hint >&2
+		die "install refusé sur le slot en marche"
+	fi
 	write_default_conf
 	local pkg tarball
 	pkg=$(find "$OUT" -maxdepth 1 -name "$PKGBASE-[0-9]*.pkg.tar.*" ! -name '*.sig' 2>/dev/null | sort | tail -1)
@@ -514,18 +538,32 @@ step_install() {
 		local rel
 		rel=$(tar -tf "$tarball" | sed -n 's|^lib/modules/\([^/]*\)/$|\1|p; s|^usr/lib/modules/\([^/]*\)/$|\1|p' | head -1)
 		[ -n "$rel" ] || die "version introuvable dans $tarball"
-		run cp "/boot/vmlinuz-$rel" "/boot/vmlinuz-$PKGBASE"
-		if command -v mkinitcpio >/dev/null; then
-			run mkinitcpio -k "$rel" -g "/boot/initramfs-$PKGBASE.img"
-		elif command -v dracut >/dev/null; then
-			run dracut --force --kver "$rel" "/boot/initramfs-$PKGBASE.img"
+		# Le noyau rangé aussi avec ses modules (comme un paquet Arch) : il reste
+		# dans la racine du slot même si /boot est l'ESP ; pkgbase le désigne
+		# comme le noyau Rago (bootloader, rago-update).
+		run install -Dm 0644 "/boot/vmlinuz-$rel" "/usr/lib/modules/$rel/vmlinuz"
+		if [ "$dry_run" = 1 ]; then echo "[dry-run] écrire /usr/lib/modules/$rel/pkgbase ($PKGBASE)"; else echo "$PKGBASE" > "/usr/lib/modules/$rel/pkgbase"; fi
+		if ab_mode; then
+			log "mode A/B : pas de noyau ni d'initramfs « $PKGBASE » dans /boot (l'UKI du slot les remplace)"
 		else
-			die "ni mkinitcpio ni dracut : initramfs impossible"
+			run cp "/boot/vmlinuz-$rel" "/boot/vmlinuz-$PKGBASE"
+			if command -v mkinitcpio >/dev/null; then
+				run mkinitcpio -k "$rel" -g "/boot/initramfs-$PKGBASE.img"
+			elif command -v dracut >/dev/null; then
+				run dracut --force --kver "$rel" "/boot/initramfs-$PKGBASE.img"
+			else
+				die "ni mkinitcpio ni dracut : initramfs impossible"
+			fi
 		fi
 	else
 		die "aucun paquet dans $OUT : lancer « package »"
 	fi
 	step_dkms_conf
+	if ab_mode; then
+		# rago-update construit l'UKI signée de ce slot juste après cette commande.
+		log "mode A/B : noyau installé dans le slot ${RAGO_UPDATE_TARGET_SLOT:-?} ; rago-update en fait l'UKI signée"
+		return 0
+	fi
 	step_sign
 	step_bootloader
 }
@@ -558,6 +596,12 @@ step_dkms_conf() {
 # --- sign ----------------------------------------------------------------------------------
 step_sign() {
 	need_root sign
+	if ab_mode; then
+		warn "mode A/B (M4) : le noyau nu n'est plus signé. Signé, il démarrerait avec n'importe quelle"
+		warn "initramfs et pourrait rejouer la mesure PCR 11 de l'UKI. Il est signé DANS l'UKI du slot :"
+		warn "  sudo rago-update uki"
+		die "sign refusé en mode A/B"
+	fi
 	command -v sbsign >/dev/null || die "sbsign absent (paquet sbsigntools)"
 	local k="${RAGO_KERNEL_IMG:-/boot/vmlinuz-$PKGBASE}"
 	[ -f "$k" ] || [ "$dry_run" = 1 ] || die "$k absent : lancer « install »"
@@ -567,37 +611,19 @@ step_sign() {
 # --- bootloader -----------------------------------------------------------------------------
 step_bootloader() {
 	need_root bootloader
+	if ab_mode && in_update_target; then
+		log "mode A/B : slot ${RAGO_UPDATE_TARGET_SLOT} en cours d'écriture ; rago-update construit son UKI signée ensuite"
+		return 0
+	fi
 	write_default_conf
-	local esp base mit extra opts entry rel shim mm sdboot dest
+	local esp sdboot shim mm dest
 	esp=$(esp_dir)
 	[ -d "$esp/loader" ] || [ "$dry_run" = 1 ] || die "$esp/loader absent : systemd-boot n'est pas installé sur l'ESP ($esp)"
 
-	base=$(rago_conf_get "$CONF_FILE" RAGO_CMDLINE "")
-	[ -n "$base" ] || base=$(rago_cmdline_base "$(cat /proc/cmdline)")
-	mit=$(rago_conf_get "$CONF_FILE" RAGO_MITIGATIONS auto)
-	extra=$(rago_conf_get "$CONF_FILE" RAGO_CMDLINE_EXTRA "")
-	opts=$(rago_cmdline "$base" "$mit" "$extra") || die "RAGO_MITIGATIONS invalide : $mit (auto|off)"
-	[ "$mit" = off ] && warn "mitigations=off actif (choix explicite dans $CONF_FILE)"
-
-	# Microcode : chargé avant l'initramfs s'il est présent sur l'ESP.
-	RAGO_UCODE_IMAGES=""
-	for u in amd-ucode.img intel-ucode.img; do
-		[ -f "$esp/$u" ] && RAGO_UCODE_IMAGES="$RAGO_UCODE_IMAGES /$u"
-	done
-	export RAGO_UCODE_IMAGES
-
-	# Version installée : dossier de modules dont le fichier pkgbase est le nôtre.
-	rel=""
-	for d in /usr/lib/modules/*; do
-		if [ "$(cat "$d/pkgbase" 2>/dev/null)" = "$PKGBASE" ]; then rel=$(basename "$d"); fi
-	done
-	entry="$esp/loader/entries/rago.conf"
-	log "entrée systemd-boot : $entry"
-	if [ "$dry_run" = 1 ]; then
-		rago_loader_entry "Rago OS" "${rel:-?}" "/vmlinuz-$PKGBASE" "/initramfs-$PKGBASE.img" "$opts" | sed 's/^/[dry-run] /'
+	if ab_mode; then
+		log "mode A/B (M4) : pas d'entrée rago.conf, chaque slot démarre par son UKI signée"
 	else
-		rago_loader_entry "Rago OS" "${rel:-?}" "/vmlinuz-$PKGBASE" "/initramfs-$PKGBASE.img" "$opts" > "$entry.tmp"
-		mv "$entry.tmp" "$entry"
+		bootloader_entry "$esp"
 	fi
 
 	# systemd-boot signé avec la clé MOK.
@@ -633,7 +659,70 @@ step_bootloader() {
 	else
 		warn "shim absent (paquet shim-signed) : seul systemd-boot est signé avec la clé MOK."
 		warn "Sans shim, la clé MOK doit être dans la db UEFI (inscription firmware) pour démarrer avec Secure Boot."
-		run bootctl update --graceful
+		run bootctl --esp-path="$esp" update --graceful
+		install_sdboot "$esp" "$sdboot.signed"
+	fi
+
+	if ab_mode; then
+		# Ligne de commande (kernel.conf) ou noyau changés : nouvelle UKI du slot en
+		# marche, essayée au prochain démarrage (retour automatique si elle échoue).
+		if command -v rago-update >/dev/null; then
+			log "UKI du slot en marche reconstruite : rago-update uki"
+			run rago-update uki
+		else
+			warn "rago-update absent : sudo $repo/host/manage_atomic_updates.sh uki"
+		fi
+	fi
+}
+
+# systemd-boot signé posé sur l'ESP. `bootctl update` ne remplace pas un
+# systemd-boot de même version (même non signé) : copie explicite, puis
+# vérification. EFI/BOOT/BOOTX64.EFI (chemin de secours du firmware) n'est
+# remplacé que si c'est déjà systemd-boot, jamais le chargeur d'un autre système.
+install_sdboot() {
+	local esp=$1 src=$2 f
+	log "systemd-boot signé : $esp/EFI/systemd/systemd-bootx64.efi"
+	run install -d "$esp/EFI/systemd"
+	run install -m 0644 "$src" "$esp/EFI/systemd/systemd-bootx64.efi"
+	f="$esp/EFI/BOOT/BOOTX64.EFI"
+	if rago_is_sdboot "$f"; then
+		run install -m 0644 "$src" "$f"
+	fi
+	if [ "$dry_run" = 0 ]; then
+		sbverify --cert "$MOK_DIR/MOK.crt" "$esp/EFI/systemd/systemd-bootx64.efi" >/dev/null 2>&1 ||
+			die "systemd-boot sur l'ESP pas signé par la clé MOK"
+	fi
+}
+
+# Entrée unique rago.conf (sans M4) : noyau signé + initramfs.
+bootloader_entry() {
+	local esp=$1 base mit extra opts entry rel u d
+	base=$(rago_conf_get "$CONF_FILE" RAGO_CMDLINE "")
+	[ -n "$base" ] || base=$(rago_cmdline_base "$(cat /proc/cmdline)")
+	mit=$(rago_conf_get "$CONF_FILE" RAGO_MITIGATIONS auto)
+	extra=$(rago_conf_get "$CONF_FILE" RAGO_CMDLINE_EXTRA "")
+	opts=$(rago_cmdline "$base" "$mit" "$extra") || die "RAGO_MITIGATIONS invalide : $mit (auto|off)"
+	[ "$mit" = off ] && warn "mitigations=off actif (choix explicite dans $CONF_FILE)"
+
+	# Microcode : chargé avant l'initramfs s'il est présent sur l'ESP.
+	RAGO_UCODE_IMAGES=""
+	for u in amd-ucode.img intel-ucode.img; do
+		[ -f "$esp/$u" ] && RAGO_UCODE_IMAGES="$RAGO_UCODE_IMAGES /$u"
+	done
+	export RAGO_UCODE_IMAGES
+
+	# Version installée : dossier de modules dont le fichier pkgbase est le nôtre.
+	rel=""
+	for d in /usr/lib/modules/*; do
+		if [ "$(cat "$d/pkgbase" 2>/dev/null)" = "$PKGBASE" ]; then rel=$(basename "$d"); fi
+	done
+	entry="$esp/loader/entries/rago.conf"
+	log "entrée systemd-boot : $entry"
+	if [ "$dry_run" = 1 ]; then
+		rago_loader_entry "Rago OS" "${rel:-?}" "/vmlinuz-$PKGBASE" "/initramfs-$PKGBASE.img" "$opts" | sed 's/^/[dry-run] /'
+	else
+		rago_loader_entry "Rago OS" "${rel:-?}" "/vmlinuz-$PKGBASE" "/initramfs-$PKGBASE.img" "$opts" > "$entry.tmp"
+		mv "$entry.tmp" "$entry"
 	fi
 }
 

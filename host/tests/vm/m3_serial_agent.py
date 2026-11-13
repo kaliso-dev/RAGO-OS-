@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0
 #
-# Rago OS — agent de la console série du test VM M3.
+# Rago OS — agent de la console série des tests VM M3 et M4.
 #
 # Se branche sur la console série de la VM (socket unix de qemu) et surveille
 # les demandes de passphrase de systemd-cryptsetup (« passphrase for disk ») :
 #   type    tape la passphrase de secours, comme le joueur au clavier
 #           (démarrage où le TPM doit refuser : Secure Boot changé) ;
 #   forbid  une demande = ÉCHEC (le TPM devait déverrouiller tout seul) :
-#           code 10, la VM est arrêtée par run_m3_vm_test.sh.
+#           code 10, la VM est arrêtée par run_m3_vm_test.sh ;
+#   refuse  (M4) le firmware doit REFUSER l'image à démarrer (UKI modifiée,
+#           Secure Boot) : dès que systemd-boot l'écrit (« Security
+#           Violation », « Error loading »), code 11 et la VM est arrêtée ;
+#           une demande de passphrase (l'image a démarré) = code 10.
 #
-# Usage : m3_serial_agent.py <socket> <type|forbid> <fichier passphrase> <délai s> <fichier résultat>
+# Usage : m3_serial_agent.py <socket> <type|forbid|refuse> <fichier passphrase> <délai s> <fichier résultat>
 import re
 import socket
 import sys
@@ -19,6 +23,7 @@ import time
 sock_path, mode, pass_file, timeout, result_file = sys.argv[1:6]
 deadline = time.time() + float(timeout)
 PROMPT = re.compile(rb"(?i)passphrase for (disk )?")
+REFUSED = re.compile(rb"(?i)security violation|error loading|access denied")
 
 
 def result(text, code):
@@ -58,13 +63,17 @@ while time.time() < deadline:
     if not data:
         break  # qemu s'est arrêté
     tail += data
+    if mode == "refuse":
+        m = REFUSED.search(tail)
+        if m:
+            result("refused " + m.group(0).decode("ascii", "replace").replace(" ", "_"), 11)
     while True:
         m = PROMPT.search(tail)
         if not m:
             break
         tail = tail[m.end():]
         prompts += 1
-        if mode == "forbid":
+        if mode in ("forbid", "refuse"):
             result(f"prompt-forbidden prompts={prompts}", 10)
         if typed < 4:
             time.sleep(1.5)  # laisser l'invite prête à lire

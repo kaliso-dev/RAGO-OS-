@@ -200,3 +200,18 @@ rago_is_sha256() {
 rago_lock_var() {
 	sed -n "s/^$2=//p" "$1" | tail -1
 }
+
+# Mode A/B de M4 actif ? (/etc/rago/update.conf écrit par « rago-update setup »,
+# avec son marqueur). Alors le slot en marche ne se modifie pas, et le noyau nu
+# n'est plus signé ni posé sur l'ESP : il est embarqué dans l'UKI signée du slot.
+#   rago_ab_mode <update.conf>
+rago_ab_mode() {
+	[ -f "$1" ] && grep -q 'rago-atomic-updates' "$1"
+}
+
+# Faut-il remplacer ce fichier de l'ESP par systemd-boot signé ? Oui seulement
+# si c'est déjà systemd-boot (jamais le chargeur d'un autre système, Windows…).
+#   rago_is_sdboot <fichier EFI>
+rago_is_sdboot() {
+	[ -f "$1" ] && grep -qa 'systemd-boot' "$1"
+}

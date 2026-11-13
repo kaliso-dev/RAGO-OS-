@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0
+# Rago OS — mises à jour A/B (module M4) : un démarrage d'essai qui atteint
+# multi-user.target devient le défaut (dernier slot bon connu) ; un essai
+# raté est noté au démarrage suivant. Marqueur : rago-atomic-updates
+[Unit]
+Description=Rago OS : confirmer le démarrage d'essai (mises à jour A/B)
+Documentation=file:///usr/lib/rago/manage_atomic_updates.sh
+After=multi-user.target
+ConditionPathExists=/etc/rago/update.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/rago/manage_atomic_updates.sh --quiet confirm --auto
+RemainAfterExit=yes
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target

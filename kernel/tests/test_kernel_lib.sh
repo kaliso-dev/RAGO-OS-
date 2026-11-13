@@ -173,5 +173,17 @@ check "sources.lock : version >= 6.12" 0 "$(rago_version_ge "$(rago_lock_var "$l
 check "sources.lock : tarball cohérent" 1 "$(rago_series_entries "$lock" | grep -c "^linux-$(rago_lock_var "$lock" KERNEL_VERSION).tar.xz $(rago_kernel_url "$(rago_lock_var "$lock" KERNEL_VERSION)") ")"
 check "sources.lock : patch BORE" 1 "$(rago_series_entries "$lock" | grep -c 'bore')"
 
+# --- mode A/B (M4) et systemd-boot -----------------------------------------------------------
+printf '# Rago OS — mises à jour A/B + UKI signée (module M4). Marqueur : rago-atomic-updates\nRAGO_AB_MODE="uki"\n' > "$tmp/update.conf"
+printf 'RAGO_AB_MODE="uki"\n' > "$tmp/update-sans-marqueur.conf"
+check_rc "mode A/B : update.conf de M4" 0 rago_ab_mode "$tmp/update.conf"
+check_rc "mode A/B : fichier sans marqueur" 1 rago_ab_mode "$tmp/update-sans-marqueur.conf"
+check_rc "mode A/B : fichier absent" 1 rago_ab_mode "$tmp/absent.conf"
+printf 'MZ\0\0#### LoaderInfo: systemd-boot 259 ####\0' > "$tmp/sdboot.efi"
+printf 'MZ\0\0Windows Boot Manager\0' > "$tmp/bootmgfw.efi"
+check_rc "systemd-boot reconnu" 0 rago_is_sdboot "$tmp/sdboot.efi"
+check_rc "autre chargeur laissé" 1 rago_is_sdboot "$tmp/bootmgfw.efi"
+check_rc "chargeur absent" 1 rago_is_sdboot "$tmp/absent.efi"
+
 echo "test_kernel_lib : $pass réussis, $fail échoués"
 [ "$fail" -eq 0 ]

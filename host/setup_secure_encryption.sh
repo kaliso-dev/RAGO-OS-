@@ -14,6 +14,16 @@
 # (PCR 0) ou Secure Boot (PCR 7) change : la passphrase est alors demandée,
 # puis « reseal » ré-enrôle le TPM.
 #
+# Avec M4 (host/manage_atomic_updates.sh, /etc/rago/update.conf présent) : le
+# TPM suit les entrées de démarrage Rago de l'ESP. Chaque UKI signée (noyau +
+# initramfs + ligne de commande d'un slot) a son jeton, lié aussi à PCR 11 :
+# la valeur que systemd-stub y mesurera, PRÉDITE depuis le fichier de l'UKI
+# (host/lib/rago_uki_lib.sh). Racine du slot A : jetons des UKI du slot A ;
+# slot B : celles du slot B ; swap : toutes. enroll-tpm / reseal ajoutent les
+# jetons qui manquent (passphrase) puis retirent ceux qui ne servent plus ;
+# prune-tpm retire seulement (sans passphrase). Une entrée sans UKI, ou une UKI
+# dont PCR 11 ne se prédit pas, garde un jeton PCR 0+7 (dégradation, signalée).
+#
 # Usage : setup_secure_encryption.sh [options] <commande>
 #
 # Commandes :
@@ -27,6 +37,9 @@
 #                de secours reste ; root
 #   reseal       ré-enrôle le TPM après une mise à jour du firmware / Secure
 #                Boot (même chose qu'enroll-tpm) ; root
+#   prune-tpm    (M4) retire les jetons TPM qui ne correspondent plus à aucune
+#                entrée de démarrage ; jamais la passphrase ; sans passphrase ;
+#                seulement si chaque entrée a déjà son jeton ; root
 #   install      /etc/crypttab (tpm2-device=auto), swap d'hibernation dans
 #                fstab, initramfs (dracut ou mkinitcpio), ligne de commande du
 #                noyau Rago (M0), service de contrôle du TPM ; root
@@ -61,6 +74,8 @@
 #   --swap-device DEV | --swap-uuid UUID       (install) volume LUKS du swap
 #   --other-slot-device DEV | --other-slot-uuid UUID   (install) l'autre slot
 #   --initramfs auto|dracut|mkinitcpio         (install) générateur d'initramfs
+#   --esp DIR             (M4) ESP où sont les entrées de démarrage (défaut :
+#                         RAGO_ESP de /etc/rago/kernel.conf, sinon /boot)
 #   --root DIR            racine cible (tests) : écrit les fichiers dedans,
 #                         n'applique rien (implique --no-apply)
 #   --no-apply            écrit les fichiers sans régénérer l'initramfs
@@ -78,13 +93,15 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 libdir=""
 for d in "$here/lib" /usr/lib/rago; do
-	if [ -f "$d/rago_crypt_lib.sh" ] && [ -f "$d/rago_host_lib.sh" ]; then libdir=$d; break; fi
+	if [ -f "$d/rago_crypt_lib.sh" ] && [ -f "$d/rago_host_lib.sh" ] && [ -f "$d/rago_uki_lib.sh" ]; then libdir=$d; break; fi
 done
-[ -n "$libdir" ] || { echo "ERREUR : rago_crypt_lib.sh / rago_host_lib.sh introuvables" >&2; exit 1; }
+[ -n "$libdir" ] || { echo "ERREUR : rago_crypt_lib.sh / rago_host_lib.sh / rago_uki_lib.sh introuvables" >&2; exit 1; }
 # shellcheck source-path=SCRIPTDIR source=lib/rago_host_lib.sh
 . "$libdir/rago_host_lib.sh"
 # shellcheck source-path=SCRIPTDIR source=lib/rago_crypt_lib.sh
 . "$libdir/rago_crypt_lib.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/rago_uki_lib.sh
+. "$libdir/rago_uki_lib.sh"
 
 SRC_UNIT_SVC="$here/systemd/rago-tpm-check.service"
 SRC_UNIT_TIMER="$here/systemd/rago-tpm-check.timer"
@@ -108,6 +125,7 @@ P_BIN=/usr/bin/rago-encryption
 P_UNIT_SVC=/usr/lib/systemd/system/rago-tpm-check.service
 P_UNIT_TIMER=/usr/lib/systemd/system/rago-tpm-check.timer
 P_RUNSTATUS=/run/rago/encryption-status
+P_UPDCONF=/etc/rago/update.conf
 SWAP_PRIO=10
 EFI_GLOBAL=8be4df61-93ca-11d2-aa0d-00e098032b8c
 
@@ -121,7 +139,7 @@ cmd=""
 o_device="" o_role="" o_name="" o_passfile="" o_yes=0 o_virtual=${RAGO_ENC_VIRTUAL_ONLY:-0}
 o_pcrs="" o_tpm="" o_zero_pcrs=0 o_iter="" o_mem="" o_discard="" o_mkswap=1 o_slot=""
 o_root_dev="" o_root_uuid="" o_swap_dev="" o_swap_uuid="" o_other_dev="" o_other_uuid=""
-o_initramfs="" o_quiet=0
+o_initramfs="" o_quiet=0 o_esp=""
 
 log()  { [ "$o_quiet" = 1 ] || printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
@@ -153,12 +171,13 @@ while [ $# -gt 0 ]; do
 	--other-slot-device) val "$@"; o_other_dev=$2; shift 2 ;;
 	--other-slot-uuid) val "$@"; o_other_uuid=$2; shift 2 ;;
 	--initramfs) val "$@"; o_initramfs=$2; shift 2 ;;
+	--esp) val "$@"; o_esp=$2; shift 2 ;;
 	--quiet) o_quiet=1; shift ;;
 	--root) val "$@"; root=$2; shift 2 ;;
 	--no-apply) apply=0; shift ;;
 	--dry-run) dry_run=1; shift ;;
 	-h | --help) usage; exit 0 ;;
-	check | format | open | close | enroll-tpm | reseal | install | verify | status | tpm-check | cmdline | deps)
+	check | format | open | close | enroll-tpm | reseal | prune-tpm | install | verify | status | tpm-check | cmdline | deps)
 		[ -z "$cmd" ] || die "une seule commande à la fois ($cmd, $1)"
 		cmd=$1; shift ;;
 	*) die "option ou commande inconnue : $1 (--help)" ;;
@@ -910,6 +929,8 @@ record_pcrs() {
 step_enroll() {
 	need_root "$cmd"
 	load_settings
+	load_ab
+	if [ "$AB" = 1 ]; then step_enroll_ab; return; fi
 	have systemd-cryptenroll || die "systemd-cryptenroll absent"
 	local vols v pcrs n val bad="" list npw ntpm sb fails=0
 	vols=$(target_volumes)
@@ -967,6 +988,344 @@ step_enroll() {
 	[ "$dry_run" = 1 ] || rm -f "$R$P_RUNSTATUS"
 	log "TPM enrôlé sur : $(echo "$vols" | tr '\n' ' ')(passphrase de secours gardée)"
 	pcr7_warning
+}
+
+# =====================================================================================
+# M4 : un jeton TPM par entrée de démarrage (UKI signée + PCR 11 prédit)
+# =====================================================================================
+# M4 en place ? (/etc/rago/update.conf écrit par manage_atomic_updates.sh setup)
+ab_active() { grep -qs "$RAGO_AB_MARKER" "$R$P_UPDCONF"; }
+
+pcrs_without() { # pcrs_without <liste 0+7+11> <pcr> -> liste sans ce PCR
+	local p out=""
+	for p in ${1//+/ }; do [ "$p" = "$2" ] || out="$out+$p"; done
+	echo "${out#+}"
+}
+
+# systemd-cryptenroll accepte-t-il une valeur de PCR donnée d'avance
+# (« 11:sha256=… », systemd ≥ 254) ?
+cryptenroll_has_pcr_values() {
+	local v
+	v=$(systemd-cryptenroll --version 2>/dev/null | awk 'NR == 1 { print $2 }' || true)
+	version_ge "${v:-0}" 254
+}
+
+# Réglages de M4 : AB=1 si M4 est en place ; ESPDIR, AB_PCR11 (0|1). PCR 11 est
+# géré ici (valeur prédite par UKI) : retiré de PCRS, la liste lue sur le TPM.
+load_ab() {
+	AB=0
+	AB_PCR11=0
+	ESPDIR=""
+	AB_TABLE=""
+	PCRV=""
+	ab_active || return 0
+	AB=1
+	AB_PCR11=$(rago_conf_get "$R$P_UPDCONF" RAGO_AB_PCR11 1)
+	case "$AB_PCR11" in 0 | 1) ;; *) die "RAGO_AB_PCR11 invalide dans $P_UPDCONF (0 ou 1)" ;; esac
+	if [ -n "$o_esp" ]; then
+		ESPDIR=${o_esp%/}
+	else
+		ESPDIR="$R$(rago_conf_get "$R$P_KCONF" RAGO_ESP /boot)"
+		ESPDIR=${ESPDIR%/}
+	fi
+	PCRS=$(pcrs_without "$PCRS" 11)
+	[ -n "$PCRS" ] || die "PCR liés au TPM : il faut au moins 0+7 en plus de PCR 11"
+	if [ "$AB_PCR11" = 1 ] && have systemd-cryptenroll && ! cryptenroll_has_pcr_values; then
+		warn "systemd-cryptenroll trop ancien (< 254) pour lier PCR 11 à une valeur prédite : TPM lié à PCR $PCRS seulement (dégradé, l'UKI reste signée)"
+		AB_PCR11=0
+	fi
+	return 0
+}
+
+# Certificat MOK de M0 : seules les UKI qu'il signe reçoivent un jeton (une UKI
+# déposée par quelqu'un d'autre sur l'ESP n'est jamais enrôlée).
+mok_cert() { echo "${RAGO_MOK_DIR:-$R/etc/rago/secureboot}/MOK.crt"; }
+
+uki_signed_by_mok() { # 0 = signée par la clé MOK ; 1 = non ; 2 = vérification impossible
+	local c
+	c=$(mok_cert)
+	[ -f "$c" ] && have sbverify || return 2
+	sbverify --cert "$c" "$1" >/dev/null 2>&1
+}
+
+# Table des entrées de démarrage Rago de l'ESP (une fois par commande) :
+#   AB_TABLE : lignes « <id> <slot a|b> <uki|conf> <PCR 11 prédit ou -> »
+# (l'entrée unique de M0, rago.conf, ouvre le slot de ce système).
+ab_build_table() {
+	local id slot kind f pred rc meta
+	AB_TABLE=""
+	while read -r id slot kind; do
+		[ -n "$id" ] || continue
+		[ "$slot" = m0 ] && slot=${SLOT:-a}
+		pred=-
+		if [ "$kind" = uki ]; then
+			f="$ESPDIR/$(rago_ab_entry_path "$id")"
+			rc=0
+			uki_signed_by_mok "$f" || rc=$?
+			case "$rc" in
+			0) ;;
+			1) warn "$id : pas signée par la clé MOK ($(mok_cert)) : ignorée (aucun jeton TPM pour elle)"; continue ;;
+			*) warn "$id : signature non vérifiable (sbverify ou $(mok_cert) absent) : prise telle quelle" ;;
+			esac
+			# Une UKI d'un slot copiée sous le nom de l'autre n'ouvre pas ce dernier.
+			meta=$(rago_uki_meta "$f" slot)
+			if [ -n "$meta" ] && [ "$meta" != "$slot" ]; then
+				warn "$id : UKI du slot « $meta » sous le nom du slot $slot : ignorée (aucun jeton TPM pour elle)"
+				continue
+			fi
+			if [ "$AB_PCR11" = 1 ]; then
+				rc=0
+				pred=$(rago_uki_unlock_pcr11 "$f") || rc=$?
+				case "$rc" in
+				0) ;;
+				2) pred=-; warn "$id : UKI à sections non prises en charge (profils…) : PCR 11 non prédit, jeton PCR $PCRS seulement (dégradé)" ;;
+				3) pred=-; warn "$id : UKI sans métadonnées Rago (.rago) : PCR 11 non prédit, jeton PCR $PCRS seulement (dégradé)" ;;
+				*) pred=-; warn "$id : UKI illisible : jeton PCR $PCRS seulement (dégradé)" ;;
+				esac
+			fi
+		fi
+		AB_TABLE="$AB_TABLE$id $slot $kind $pred"$'\n'
+	done < <(rago_ab_entries "$ESPDIR")
+	return 0
+}
+
+# Empreinte de la politique TPM d'un jeton : PCR de base à leur valeur actuelle
+# (PCRV), plus PCR 11 prédit s'il est donné.
+ab_policy() { # ab_policy <PCR 11 prédit ou "">
+	local a=() n v
+	while read -r n v; do
+		[ -n "$n" ] && a+=("$n=$v")
+	done <<<"$PCRV"
+	[ -n "$1" ] && a+=("11=$1")
+	rago_tpm2_policy_pcr "${a[@]}"
+}
+
+# Jetons attendus pour un volume : une ligne par politique distincte
+#   <empreinte> <PCR pour systemd-cryptenroll> <entrées séparées par ,>
+#   ab_expected <root-a|root-b|swap>
+ab_expected() {
+	local role=$1 id slot kind pred pol spec out=""
+	while read -r id slot kind pred; do
+		[ -n "$id" ] || continue
+		case "$role" in
+		root-a) [ "$slot" = a ] || continue ;;
+		root-b) [ "$slot" = b ] || continue ;;
+		esac
+		if [ "$pred" = - ]; then
+			spec=$PCRS
+			pol=$(ab_policy "") || return 1
+		else
+			spec="$PCRS+11:sha256=$pred"
+			pol=$(ab_policy "$pred") || return 1
+		fi
+		out="$out$pol $spec $id"$'\n'
+	done <<<"$AB_TABLE"
+	printf '%s' "$out" | awk 'NF {
+		if (!($1 in s)) { o[++n] = $1; s[$1] = $2 }
+		e[$1] = e[$1] (e[$1] == "" ? "" : ",") $3
+	} END { for (i = 1; i <= n; i++) print o[i], s[o[i]], e[o[i]] }'
+}
+
+ab_tokens() { luks_dump "$1" | rago_luks_tpm2_tokens; }
+
+has_policy() { awk -v p="$1" '$4 == p { f = 1 } END { exit !f }' <<<"$2"; } # has_policy <empreinte> <jetons>
+
+# Volumes Rago : « <rôle> <uuid> », ou celui de --device.
+ab_volumes() {
+	local u r
+	if [ -n "$o_device" ]; then
+		u=$(luks_uuid "$o_device")
+		case "$u" in
+		"") die "$o_device n'est pas un volume LUKS" ;;
+		"$ROOT_A_UUID") r="root-a" ;;
+		"$ROOT_B_UUID") r="root-b" ;;
+		"$SWAP_UUID") r=swap ;;
+		*) die "$o_device (UUID=$u) n'est pas un volume Rago de $P_CONF" ;;
+		esac
+		echo "$r $u"
+		return 0
+	fi
+	[ -f "$R$P_CONF" ] || die "pas de $P_CONF : lancer install d'abord"
+	[ -z "$ROOT_A_UUID" ] || echo "root-a $ROOT_A_UUID"
+	[ -z "$ROOT_B_UUID" ] || echo "root-b $ROOT_B_UUID"
+	[ -z "$SWAP_UUID" ] || echo "swap $SWAP_UUID"
+	return 0
+}
+
+# PCR actuels (PCRV) + table des entrées ; refus si l'ESP ne montre aucune entrée
+# pour le slot en marche (ESP pas montée : on ne retire jamais rien à l'aveugle).
+ab_prepare() {
+	local n val bad=""
+	PCRV=$(read_pcrs || true)
+	[ -n "$PCRV" ] || die "PCR $PCRS illisibles : TPM absent ? (tpm2-tools pour un TPM non standard)"
+	while read -r n val; do
+		rago_pcr_is_unmeasured "$val" && bad="$bad $n"
+	done <<<"$PCRV"
+	if [ -n "$bad" ]; then
+		if [ "$o_zero_pcrs" = 1 ]; then
+			warn "PCR${bad} jamais mesurés : forcé (--allow-zero-pcrs), le TPM ne protège RIEN"
+		else
+			die "PCR${bad} jamais mesurés par le firmware : lier le TPM ne protégerait rien. Refusé (--allow-zero-pcrs pour forcer)"
+		fi
+	fi
+	[ -d "$ESPDIR" ] || die "ESP introuvable : $ESPDIR (--esp, ou RAGO_ESP dans $P_KCONF)"
+	ab_build_table
+	awk -v s="${SLOT:-a}" '$2 == s { f = 1 } END { exit !f }' <<<"$AB_TABLE" ||
+		die "aucune entrée de démarrage Rago du slot ${SLOT:-a} dans $ESPDIR (ESP pas montée ?) : rien n'est changé"
+}
+
+# Combien de jetons attendus manquent sur un volume.
+ab_missing() { # ab_missing <rôle> <volume>
+	local exp toks pol spec ids n=0
+	exp=$(ab_expected "$1") || { echo 0; return 1; }
+	toks=$(ab_tokens "$2")
+	while read -r pol spec ids; do
+		[ -n "$pol" ] || continue
+		has_policy "$pol" "$toks" || n=$((n + 1))
+	done <<<"$exp"
+	echo "$n"
+}
+
+# Met les jetons TPM d'un volume en accord avec les entrées de démarrage :
+# ajoute ceux qui manquent (si <ajouter> = 1, passphrase dans PASS), puis, si
+# chaque entrée a son jeton, retire les jetons qui ne servent plus. Jamais un
+# emplacement de passphrase. Code 1 si des jetons manquent encore.
+#   ab_sync_volume <rôle> <volume> <ajouter 0|1>
+ab_sync_volume() {
+	local role=$1 dev=$2 add=$3 exp toks pol spec ids miss=0 tok kslots pcrs ks list npw err
+	exp=$(ab_expected "$role") || { warn "$role : politique TPM incalculable"; return 1; }
+	toks=$(ab_tokens "$dev")
+	[ -n "$exp" ] || log "$role ($dev) : aucune entrée de démarrage ne l'ouvre"
+	while read -r pol spec ids; do
+		[ -n "$pol" ] || continue
+		if has_policy "$pol" "$toks"; then
+			log "$role : jeton TPM à jour pour $ids"
+			continue
+		fi
+		if [ "$add" = 0 ]; then
+			warn "$role : pas de jeton TPM pour $ids (la passphrase sera demandée au démarrage par cette entrée)"
+			miss=$((miss + 1))
+			continue
+		fi
+		case "$spec" in
+		*:sha256=*) log "$role ($dev) : enrôlement TPM pour $ids (PCR $PCRS + 11 = mesure prédite de l'UKI)" ;;
+		*) log "$role ($dev) : enrôlement TPM pour $ids (PCR $PCRS)" ;;
+		esac
+		if [ "$dry_run" = 1 ]; then
+			printf '[dry-run] systemd-cryptenroll --tpm2-device=%s --tpm2-pcrs=%s %s\n' "$TPM2_DEVICE" "$spec" "$dev"
+			continue
+		fi
+		if ! err=$(PASSWORD="$PASS" systemd-cryptenroll --tpm2-device="$TPM2_DEVICE" --tpm2-pcrs="$spec" "$dev" 2>&1 < /dev/null); then
+			warn "systemd-cryptenroll a échoué sur $dev : $(printf '%s' "$err" | tail -1)"
+			miss=$((miss + 1))
+			continue
+		fi
+		toks=$(ab_tokens "$dev")
+		if ! has_policy "$pol" "$toks"; then
+			# La politique calculée ici n'est pas celle de systemd : on ne sait plus
+			# reconnaître les jetons, donc on ne retire rien.
+			warn "$role : le nouveau jeton n'a pas la politique attendue ($pol) : aucun retrait sur ce volume"
+			miss=$((miss + 1))
+		fi
+	done <<<"$exp"
+	[ "$miss" = 0 ] || return 1
+	[ "$dry_run" = 1 ] && [ "$add" = 1 ] && return 0
+	list=$(enroll_list "$dev")
+	while read -r tok kslots pcrs pol; do
+		[ -n "$tok" ] || continue
+		awk -v p="$pol" '$1 == p { f = 1 } END { exit !f }' <<<"$exp" && continue
+		for ks in ${kslots//,/ }; do
+			if [ "$(awk -v s="$ks" '$1 == s { print $2 }' <<<"$list")" != tpm2 ]; then
+				warn "$role : emplacement $ks du jeton $tok n'est pas un emplacement TPM : laissé"
+				continue 2
+			fi
+		done
+		log "$role ($dev) : retrait du jeton TPM qui ne sert plus (emplacement $kslots, PCR $pcrs)"
+		if [ "$dry_run" = 1 ]; then
+			printf '[dry-run] systemd-cryptenroll --wipe-slot=%s %s\n' "$kslots" "$dev"
+			continue
+		fi
+		systemd-cryptenroll --wipe-slot="$kslots" "$dev" >/dev/null 2>&1 < /dev/null || warn "$role : retrait de l'emplacement $kslots impossible"
+	done <<<"$toks"
+	[ "$dry_run" = 1 ] && return 0
+	npw=$(rago_slots_count "$(enroll_list "$dev")" password)
+	[ "$npw" -ge 1 ] || die "$dev : plus de passphrase de secours (ne devrait jamais arriver) : NE PAS redémarrer, cryptsetup luksAddKey $dev"
+	return 0
+}
+
+ab_report_entries() {
+	local id slot kind pred
+	while read -r id slot kind pred; do
+		[ -n "$id" ] || continue
+		if [ "$pred" = - ]; then
+			log "entrée $id (slot $slot) : jeton PCR $PCRS"
+		else
+			log "entrée $id (slot $slot) : jeton PCR $PCRS + 11 (UKI signée, PCR 11 prédit ${pred:0:16}…)"
+		fi
+	done <<<"$AB_TABLE"
+}
+
+step_enroll_ab() {
+	have systemd-cryptenroll || die "systemd-cryptenroll absent"
+	local vols role u d n need=0 fails=0 sb
+	vols=$(ab_volumes)
+	[ -n "$vols" ] || die "aucun volume à enrôler"
+	ab_prepare
+	ab_report_entries
+	sb=$(secure_boot_state)
+	[ "$sb" = off ] && warn "Secure Boot est inactif : l'UKI n'est pas vérifiée au démarrage et PCR 7 changera à l'activation (passphrase, puis « reseal »)"
+	while read -r role u; do
+		[ -n "$role" ] || continue
+		d=$(dev_by_uuid "$u") || die "$role : volume UUID=$u introuvable"
+		cryptsetup isLuks --type luks2 "$d" 2>/dev/null || die "$d n'est pas un volume LUKS2"
+		[ "$(rago_slots_count "$(enroll_list "$d")" password)" -ge 1 ] ||
+			die "$d n'a AUCUNE passphrase de secours : refusé (jamais le TPM seul). Ajoute-en une : cryptsetup luksAddKey $d"
+		n=$(ab_missing "$role" "$d") || die "$role : politique TPM incalculable"
+		need=$((need + n))
+	done <<<"$vols"
+	if [ "$need" -gt 0 ] && [ "$dry_run" = 0 ]; then
+		get_pass
+		while read -r role u; do
+			[ -n "$role" ] || continue
+			d=$(dev_by_uuid "$u")
+			pass_opens "$d" || die "la passphrase de secours n'ouvre pas $d : rien n'a été changé"
+		done <<<"$vols"
+	elif [ "$need" = 0 ]; then
+		log "chaque entrée de démarrage a déjà son jeton TPM : pas besoin de la passphrase"
+	fi
+	while read -r role u; do
+		[ -n "$role" ] || continue
+		d=$(dev_by_uuid "$u")
+		ab_sync_volume "$role" "$d" 1 || fails=$((fails + 1))
+	done <<<"$vols"
+	[ "$fails" = 0 ] || die "$fails volume(s) sans tous leurs jetons TPM (voir ci-dessus) : la passphrase de secours reste demandée par les entrées concernées"
+	record_pcrs "$PCRV"
+	[ "$dry_run" = 1 ] || rm -f "$R$P_RUNSTATUS"
+	log "TPM en accord avec les entrées de démarrage (passphrase de secours gardée)"
+	pcr7_warning
+}
+
+# prune-tpm : retire seulement (sans passphrase), volume par volume, quand
+# chaque entrée de démarrage a déjà son jeton. Code 1 s'il en manque.
+step_prune() {
+	need_root prune-tpm
+	load_settings
+	load_ab
+	[ "$AB" = 1 ] || die "prune-tpm sert aux mises à jour A/B (M4 : $P_UPDCONF absent) ; sans M4, enroll-tpm / reseal remplacent le jeton"
+	have systemd-cryptenroll || die "systemd-cryptenroll absent"
+	local vols role u d fails=0
+	vols=$(ab_volumes)
+	ab_prepare
+	while read -r role u; do
+		[ -n "$role" ] || continue
+		d=$(dev_by_uuid "$u") || { warn "$role : volume UUID=$u introuvable"; continue; }
+		ab_sync_volume "$role" "$d" 0 || fails=$((fails + 1))
+	done <<<"$vols"
+	if [ "$fails" -gt 0 ]; then
+		warn "$fails volume(s) n'ont pas un jeton pour chaque entrée : rien n'y est retiré ; sudo rago-encryption reseal"
+		return 1
+	fi
+	log "jetons TPM en accord avec les entrées de démarrage"
 }
 
 # =====================================================================================
@@ -1137,7 +1496,7 @@ update_kernel_cmdline() {
 install_tool() {
 	local f
 	log "outil : $P_BIN, $P_LIBDIR/, service rago-tpm-check"
-	for f in rago_crypt_lib.sh rago_host_lib.sh; do
+	for f in rago_crypt_lib.sh rago_host_lib.sh rago_uki_lib.sh; do
 		put_file "$P_LIBDIR/$f" 0644 < "$libdir/$f"
 	done
 	put_file "$P_LIBDIR/setup_secure_encryption.sh" 0755 < "$here/$(basename "${BASH_SOURCE[0]}")"
@@ -1180,7 +1539,13 @@ step_install() {
 	fi
 	regen_initramfs
 	if [ "$NEED_BOOTLOADER" = 1 ]; then
-		warn "ligne de commande changée : sudo kernel/build_rago_kernel.sh bootloader, puis redémarrer"
+		if ab_active; then
+			warn "ligne de commande changée : sudo rago-update uki (nouvelle UKI du slot, essayée au redémarrage)"
+		else
+			warn "ligne de commande changée : sudo kernel/build_rago_kernel.sh bootloader, puis redémarrer"
+		fi
+	elif ab_active && [ "$apply" = 1 ]; then
+		warn "initramfs régénérée : elle n'est dans l'UKI qu'après sudo rago-update uki (M4)"
 	fi
 	log "installation terminée ; vérification :"
 	local rc=0
@@ -1196,8 +1561,8 @@ step_install() {
 # =====================================================================================
 # verify
 # =====================================================================================
-verify_volume() { # verify_volume <rôle> <uuid>
-	local role=$1 u=$2 d sum list npw ntpm tokpcrs
+verify_volume() { # verify_volume <rôle affiché> <uuid> <root-a|root-b|swap>
+	local role=$1 u=$2 key=$3 d sum list npw ntpm tokpcrs
 	d=$(dev_by_uuid "$u" 2>/dev/null) || { ko "$role : volume UUID=$u introuvable"; return; }
 	sum=$(luks_dump "$d" | rago_luks_summary)
 	if grep -qx 'version 2' <<<"$sum"; then ok "$role ($d) : LUKS2"; else ko "$role ($d) : pas LUKS2"; return; fi
@@ -1211,6 +1576,10 @@ verify_volume() { # verify_volume <rôle> <uuid>
 	npw=$(rago_slots_count "$list" password)
 	ntpm=$(rago_slots_count "$list" tpm2)
 	if [ "$npw" -ge 1 ]; then ok "$role : passphrase de secours présente ($npw)"; else ko "$role : AUCUNE passphrase de secours : le TPM est le seul moyen d'ouvrir ce volume (DANGER : cryptsetup luksAddKey $d)"; fi
+	if [ "$AB" = 1 ]; then
+		verify_tokens_ab "$role" "$key" "$d"
+		return
+	fi
 	if [ "$ntpm" -eq 1 ]; then
 		tokpcrs=$(awk '$1 == "token" && $3 == "systemd-tpm2" { print $5; exit }' <<<"$sum")
 		if [ "$(rago_pcrs_normalize "$tokpcrs" 2>/dev/null)" = "$PCRS" ]; then ok "$role : TPM enrôlé (PCR $tokpcrs)"; else att "$role : TPM enrôlé sur les PCR $tokpcrs (réglage : $PCRS)"; fi
@@ -1223,6 +1592,40 @@ verify_volume() { # verify_volume <rôle> <uuid>
 		att "$role : TPM pas enrôlé : passphrase à chaque démarrage (sudo rago-encryption enroll-tpm)"
 	else
 		att "$role : $ntpm enrôlements TPM (1 attendu : sudo rago-encryption reseal)"
+	fi
+}
+
+# M4 : chaque entrée de démarrage qui ouvre ce volume a-t-elle son jeton ?
+verify_tokens_ab() { # verify_tokens_ab <rôle affiché> <root-a|root-b|swap> <volume>
+	local name=$1 key=$2 d=$3 exp toks pol spec ids stale has_base=0 st
+	if [ -z "$AB_TABLE" ]; then skip "$name : jetons TPM non contrôlés (pas d'entrée de démarrage lue)"; return; fi
+	exp=$(ab_expected "$key") || { ko "$name : politique TPM incalculable"; return; }
+	toks=$(ab_tokens "$d")
+	[ -n "$exp" ] || att "$name : aucune entrée de démarrage Rago ne l'ouvre (slot pas encore installé ?)"
+	while read -r pol spec ids; do
+		[ -n "$pol" ] || continue
+		case "$spec" in *:sha256=*) ;; *) has_base=1 ;; esac
+		if has_policy "$pol" "$toks"; then
+			case "$spec" in
+			*:sha256=*) ok "$name : jeton TPM à jour pour $ids (PCR $PCRS + 11 de l'UKI)" ;;
+			*) ok "$name : jeton TPM à jour pour $ids (PCR $PCRS)" ;;
+			esac
+		else
+			ko "$name : pas de jeton TPM pour $ids (firmware / Secure Boot changé, ou UKI pas re-scellée) : passphrase au démarrage par cette entrée ; sudo rago-encryption reseal"
+		fi
+	done <<<"$exp"
+	stale=$(awk -v e="$(awk '{ print $1 }' <<<"$exp" | tr '\n' ' ')" 'BEGIN { n = split(e, a, " "); for (i = 1; i <= n; i++) k[a[i]] = 1 } NF && !($4 in k) { c++ } END { print c + 0 }' <<<"$toks")
+	[ "$stale" = 0 ] || att "$name : $stale jeton(s) TPM qui ne servent plus (anciennes UKI ou anciens PCR) : sudo rago-encryption prune-tpm"
+	if [ "$has_base" = 1 ]; then
+		st=0
+		tpm_unseal_test "$d" || st=$?
+		case "$st" in
+		0) ok "$name : le TPM ouvre le volume avec les PCR actuels (jeton PCR $PCRS)" ;;
+		1) ko "$name : le TPM REFUSE avec les PCR actuels (jeton PCR $PCRS)" ;;
+		*) skip "$name : test d'ouverture par le TPM impossible ici" ;;
+		esac
+	elif [ -n "$exp" ]; then
+		skip "$name : jetons liés à PCR 11 : le TPM ne les descelle que dans l'initramfs (barrière de systemd), contrôle par leur politique"
 	fi
 }
 
@@ -1385,12 +1788,24 @@ step_verify() {
 	if is_ours "$R$P_CONF"; then ok "réglages : $P_CONF (slot ${SLOT:-?})"; else ko "réglages : $P_CONF absent (install)"; bilan; return; fi
 	# Volumes : toujours sur le système vivant ; avec --root (installateur,
 	# tests), ceux qui sont branchés.
-	local role u
+	local role u key
+	load_ab
+	if [ "$AB" = 1 ]; then
+		PCRV=$(read_pcrs 2>/dev/null || true)
+		if [ ! -d "$ESPDIR" ]; then
+			ko "M4 : ESP introuvable ($ESPDIR) : jetons TPM des entrées de démarrage non contrôlés"
+		elif [ -z "$PCRV" ]; then
+			skip "M4 : PCR $PCRS illisibles : jetons TPM des entrées de démarrage non contrôlés"
+		else
+			ab_build_table
+			if [ -n "$AB_TABLE" ]; then ok "M4 : entrées de démarrage : $(awk '{ printf "%s%s", s, $1; s = ", " }' <<<"$AB_TABLE")"; else ko "M4 : aucune entrée de démarrage Rago dans $ESPDIR"; fi
+		fi
+	fi
 	for role in "slot A" "slot B" "swap"; do
-		case "$role" in "slot A") u=$ROOT_A_UUID ;; "slot B") u=$ROOT_B_UUID ;; *) u=$SWAP_UUID ;; esac
+		case "$role" in "slot A") u=$ROOT_A_UUID; key="root-a" ;; "slot B") u=$ROOT_B_UUID; key="root-b" ;; *) u=$SWAP_UUID; key=swap ;; esac
 		[ -n "$u" ] || continue
 		if [ -n "$R" ] && ! dev_by_uuid "$u" >/dev/null 2>&1; then skip "$role : volume UUID=$u pas branché (--root)"; continue; fi
-		verify_volume "$role" "$u"
+		verify_volume "$role" "$u" "$key"
 	done
 	verify_crypttab
 	verify_initramfs_conf
@@ -1419,8 +1834,13 @@ step_verify() {
 step_tpm_check() {
 	need_root tpm-check
 	load_settings
-	local u role d list rc=0 report="" st n_ref=0 n_good=0
+	local u role d list rc=0 report="" st n_ref=0 n_good=0 abok=0 key exp miss
 	[ -f "$R$P_CONF" ] || { log "pas de volume Rago ($P_CONF absent)"; return 4; }
+	load_ab
+	if [ "$AB" = 1 ]; then
+		PCRV=$(read_pcrs 2>/dev/null || true)
+		if [ -n "$PCRV" ] && [ -d "$ESPDIR" ]; then ab_build_table 2>/dev/null; abok=1; fi
+	fi
 	for role in a b swap; do
 		case "$role" in a) u=$ROOT_A_UUID ;; b) u=$ROOT_B_UUID ;; swap) u=$SWAP_UUID ;; esac
 		[ -n "$u" ] || continue
@@ -1428,7 +1848,30 @@ step_tpm_check() {
 		list=$(enroll_list "$d")
 		if [ "$(rago_slots_count "$list" tpm2)" -eq 0 ]; then report="$report${role}=not-enrolled"$'\n'; continue; fi
 		st=0
-		tpm_unseal_test "$d" || st=$?
+		if [ "$AB" = 1 ]; then
+			# M4 : jetons liés à PCR 11 (pas de test de descellement possible ici) :
+			# un jeton par entrée de démarrage, aux PCR actuels ?
+			if [ "$abok" = 0 ]; then
+				st=2
+			else
+				case "$role" in a) key="root-a" ;; b) key="root-b" ;; *) key=swap ;; esac
+				# Politique incalculable = « untestable », jamais « no-entry » ni « ok ».
+				if ! exp=$(ab_expected "$key"); then
+					st=2
+				elif [ -z "$exp" ]; then
+					report="$report${role}=no-entry"$'\n'
+					continue
+				elif ! miss=$(ab_missing "$key" "$d"); then
+					st=2
+				elif [ "$miss" = 0 ]; then
+					st=0
+				else
+					st=1
+				fi
+			fi
+		else
+			tpm_unseal_test "$d" || st=$?
+		fi
 		case "$st" in
 		0) report="$report${role}=ok"$'\n'; n_good=$((n_good + 1)) ;;
 		1) report="$report${role}=refused"$'\n'; n_ref=$((n_ref + 1)) ;;
@@ -1442,7 +1885,12 @@ step_tpm_check() {
 			printf '%s' "$report"
 		} > "$R$P_RUNSTATUS"
 	fi
-	if [ "$n_ref" -gt 0 ]; then
+	if [ "$n_ref" -gt 0 ] && [ "$AB" = 1 ]; then
+		warn "$n_ref volume(s) Rago sans jeton TPM pour chaque entrée de démarrage : firmware ou Secure Boot"
+		warn "changé, ou nouvelle UKI pas re-scellée. La passphrase de secours est demandée par ces entrées."
+		warn "Pour retrouver le déverrouillage automatique : sudo rago-encryption reseal"
+		rc=1
+	elif [ "$n_ref" -gt 0 ]; then
 		warn "le TPM refuse $n_ref volume(s) Rago avec les PCR actuels : le firmware ou Secure Boot a changé."
 		warn "La passphrase de secours a servi à ce démarrage. Pour retrouver le déverrouillage automatique :"
 		warn "  sudo rago-encryption reseal"
@@ -1498,6 +1946,7 @@ format) step_format ;;
 open) step_open ;;
 close) step_close ;;
 enroll-tpm | reseal) step_enroll ;;
+prune-tpm) step_prune ;;
 install) step_install ;;
 verify | status) step_verify ;;
 tpm-check) step_tpm_check ;;
