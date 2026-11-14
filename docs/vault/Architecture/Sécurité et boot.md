@@ -1,7 +1,7 @@
 ---
 type: carte
 tags: [architecture]
-maj: 2026-11-13
+maj: 2026-11-14
 ---
 # Sécurité et boot
 
@@ -15,7 +15,7 @@ Retour à [[Architecture]]. Modules : [[M3 Chiffrement LUKS]], [[M0 Noyau scx_ra
 
 **Lockdown non imposé** (`LOCK_DOWN_KERNEL_FORCE_NONE`) : le mode « integrity » interdit l'hibernation, dont le [[Fast OS Switch]] a besoin.
 
-**TPM 2.0 + VBS + HVCI + IOMMU** : activés côté [[Micro-Windows]] (exigés par [[Vanguard On-Demand]]).
+**TPM 2.0 + VBS + HVCI + IOMMU** : activés côté [[Micro-Windows]] (exigés par [[Vanguard On-Demand]]). [[M5 Micro-Windows]] (code du 14/11, jamais exécuté) : base VBS + HVCI dans le registre sans verrou UEFI, liste de blocage des pilotes vulnérables, Defender et pare-feu dans les deux profils ; `perf` coupe seulement l'hyperviseur ; l'état réel est renvoyé à Linux. Windows Update est coupé dans le micro-Windows, donc il ne pousse pas de mise à jour de la dbx / SBAT (qui changerait PCR 7, voir plus bas) ; une image reconstruite avec des mises à jour (`-UpdatePath`) peut le faire.
 
 **Chiffrement hôte ([[M3 Chiffrement LUKS]], code écrit le 13/11, testé sur disques virtuels seulement, jamais sur matériel)** : LUKS2 (aes-xts-plain64, clé 512 bits, sha512, argon2id) pour la racine de chaque slot A / B et le swap d'hibernation. Le TPM rend la clé au démarrage si PCR 0 (firmware) et PCR 7 (état et clés Secure Boot) sont ceux de l'enrôlement ; sinon la **passphrase de secours, obligatoire**, est demandée. Le swap chiffré est ouvert dans l'initramfs **avant** le resume du [[Fast OS Switch]] (prouvé en VM : hibernation puis reprise). Avec [[M4 Updates A-B]] : un jeton TPM par entrée de démarrage, lié aussi à **PCR 11** (mesure de l'UKI par systemd-stub, valeur prédite depuis le fichier) ; la passphrase de secours n'est jamais retirée.
 

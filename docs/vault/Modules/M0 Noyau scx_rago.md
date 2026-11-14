@@ -1,12 +1,12 @@
 ---
 type: module
 tags: [module, phase-A]
-maj: 2026-11-13
+maj: 2026-11-14
 statut: EN COURS
 ---
 # M0 Noyau scx_rago
 
-> Phase A. Statut : **EN COURS** — code écrit et testé en VM / conteneur ; **jamais testé sur vrai matériel**. Dans `main` (PR #1). Adapté le 13/11 par [[M4 Updates A-B]] (mode A/B : le noyau est embarqué dans l'UKI signée de chaque slot) : branche `claude/project-thread-8u4yl8`, PR #7 vers `main` à relire. Retour à [[Projet]], carte [[Architecture]].
+> Phase A. Statut : **EN COURS** — code écrit et testé en VM / conteneur ; **jamais testé sur vrai matériel**. Dans `main` (PR #1). Adapté le 13/11 par [[M4 Updates A-B]] (mode A/B : le noyau est embarqué dans l'UKI signée de chaque slot) : fusionné dans `main` (PR #7, 13/11). Retour à [[Projet]], carte [[Architecture]].
 
 **Objectif.** Le meilleur noyau possible pour le jeu, signé Secure Boot, avec un ordonnanceur informé par le launcher.
 

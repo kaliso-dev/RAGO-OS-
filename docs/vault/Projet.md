@@ -1,7 +1,7 @@
 ---
 type: index
 tags: [index]
-maj: 2026-11-13
+maj: 2026-11-14
 ---
 # Rago OS : le projet
 
@@ -28,7 +28,7 @@ Vue d'ensemble technique : [[Architecture]].
 - **Pilotage** : [[État actuel]] · [[Prochaines étapes]] · [[Questions ouvertes]] · [[Journal]] · [[Décisions]]
 - **Règles** : [[Règles de travail]] · [[Mettre à jour le vault]]
 - **Architecture** : [[Architecture]] · [[Noyau et ordonnanceur]] · [[Fast OS Switch]] · [[Micro-Windows]] · [[Couche Proton]] · [[Sécurité et boot]] · [[Prérequis matériel]] · [[Loi physique du POST]]
-- **Modules (le code, dans l'ordre de build)** : [[M0 Noyau scx_rago]] · [[M1 Tuning hôte]] · [[M14 Profils par jeu]] · [[M2 Couche Proton]] · [[M3 Chiffrement LUKS]] · [[M4 Updates A-B]] · [[M5 Micro-Windows]] · [[M6 Fast OS Switch]] · [[M7 Bibliothèque partagée]] · [[M8 Optimisation switch]] · [[M9 GPU]] · [[M10 Télémétrie]] · [[M11 Rago UI]] · [[M12 Installateur]] · [[M13 Build ISO]]
+- **Modules (le code, dans l'ordre de build)** : [[M0 Noyau scx_rago]] · [[M1 Tuning hôte]] · [[M14 Profils par jeu]] · [[M2 Couche Proton]] · [[M3 Chiffrement LUKS]] · [[M4 Updates A-B]] · [[M5 Micro-Windows]] · [[M7 Bibliothèque partagée]] · [[M6 Fast OS Switch]] · [[M8 Optimisation switch]] · [[M9 GPU]] · [[M10 Télémétrie]] · [[M11 Rago UI]] · [[M12 Installateur]] · [[M13 Build ISO]]
 - **Recherche** : [[Vanguard On-Demand]] · [[Innovations avancées]]
 - **Marketing** : [[Marché]] · [[Monétisation]]
 - **Premium (roadmap)** : [[Rago Console coreboot]]
