@@ -1,7 +1,7 @@
 ---
 type: module
 tags: [module, phase-A]
-maj: 2026-11-13
+maj: 2026-11-14
 statut: EN COURS
 ---
 # M14 Profils par jeu
@@ -33,7 +33,7 @@ statut: EN COURS
 - **Session = connexion au socket** `/run/rago-profiled/profiled.sock` (root:rago 0660, le groupe de M0). Si le launcher est tué, le socket se ferme et la base revient. Plusieurs jeux : le dernier lancé est appliqué, puis celui d'en dessous, puis la base.
 - **Cohérence avec M1** : photo de la base avant toute écriture (`/run/rago-profiled/applied.json`), seul ce qui a été changé est remis ; C-states par demande PM QoS sur `/dev/cpu_dma_latency` (même mécanisme que `force_latency` de tuned ; `shallow` = latence de C1, repli 3 µs, comme M1) : le noyau garde la plus stricte, un profil peut **ajouter** une limite, pas relâcher celle de M1. Démon tué → le noyau retire seul la demande PM QoS, et le démon relancé remet gouverneur / THP.
 - **Mitigations** : réglage global du noyau (M0, `RAGO_MITIGATIONS`) : comparé et signalé, **jamais changé**.
-- **En attente (hooks)** : horloges GPU → hook `gpu-clocks apply|restore` à fournir par [[M9 GPU]] ; profil de sécurité Windows → `rago-profiled prepare-switch --id <jeu>` appelle le hook `windows-security set` (`RAGO_WINDOWS_SECURITY`) à fournir par [[M5 Micro-Windows]] / [[M6 Fast OS Switch]] pour l'écrire dans RAGO-COMM. Tant qu'un hook manque : « en attente », rien ne casse (`prepare-switch` sort en code 4). Contrat : `profiles/README.md`.
+- **Hooks** : horloges GPU → hook `gpu-clocks apply|restore` à fournir par [[M9 GPU]] (en attente) ; profil de sécurité Windows → `rago-profiled prepare-switch --id <jeu>` appelle le hook `windows-security set` (`RAGO_WINDOWS_SECURITY`), **fourni par [[M5 Micro-Windows]] le 14/11** (`host/hooks/windows-security`, installé par `host/setup_windows_security.sh install`) : il l'écrit dans RAGO-COMM ; prouvé de bout en bout avec le vrai `rago-profiled` (conteneur, et VM sur une vraie FAT32 avec le service durci, sans `ReadWritePaths=`). Côté Windows, jamais exécuté. Tant qu'un hook manque : « en attente », rien ne casse (`prepare-switch` sort en code 4). Contrat : `profiles/README.md`.
 - **Sans démon** : le jeu se lance quand même (base, hint M0 seulement). Sans `rago-sched-hint` : le jeu se lance sans hint.
 
 ## Tests faits (par Claude, sans matériel)
@@ -48,7 +48,7 @@ statut: EN COURS
 2. `sudo daemons/rago-profiled/tests/real_kernel_test.sh --bin /usr/bin/rago-profiled` → tout PASS, et cette fois la ligne cpufreq vérifie le vrai gouverneur.
 3. Dans Steam, options de lancement d'un jeu : `rago-profiled launch -- %command%`. Pendant le jeu : `rago-profiled status` (session ACTIVE, gouverneur / THP / C-states du profil) et `rago-sched-hint list` (jeu tagué). Après : `host/setup_host_tuning.sh verify` = 0.
 4. Mesurer avant de passer un profil à `verified = true` : 1 % low MangoHud, même scène, profil contre base (`host/tests/m1_frametime_compare.sh`).
-5. Côté switch (quand M5/M6 existeront) : `rago-profiled prepare-switch --id valorant` puis VBS/HVCI vérifiés dans le micro-Windows.
+5. Côté switch (avec M5) : `rago-profiled prepare-switch --id valorant`, démarrer Windows, puis au retour `sudo host/setup_windows_security.sh status` (VBS / HVCI réels écrits par le micro-Windows). Détail : `windows/README.md`.
 
 **Dépend de / relié à :** [[M1 Tuning hôte]] (la base), [[M0 Noyau scx_rago]] (hint, groupe rago, mitigations), [[M2 Couche Proton]] (appelle `launch` depuis le hook `rago-launch`, 13/11), [[M5 Micro-Windows]] et [[M6 Fast OS Switch]] (hook `windows-security`), [[M9 GPU]] (hook `gpu-clocks`), [[M11 Rago UI]] (`launch`, `prepare-switch`, `show`/`list` pour l'écran des profils), [[M13 Build ISO]] (doit installer binaire, service et `profiles/community/`).
 

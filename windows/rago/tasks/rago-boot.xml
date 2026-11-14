@@ -1,0 +1,48 @@
+<!-- SPDX-License-Identifier: GPL-2.0 -->
+<!-- Rago OS - micro-Windows (M5) : tache \Rago\Boot, enregistree par C:\Rago\setup\firstboot.ps1
+     (Register-ScheduledTask -Xml). A chaque demarrage, compte SYSTEM : ouverture de session
+     automatique, shell Rago, profil de securite demande par Linux, rapport M5.
+     Fichier en ASCII et sans declaration XML : il est passe en chaine a l'API du planificateur. -->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>Rago OS</Author>
+    <Description>Rago OS (M5) : profil de securite du micro-Windows demande par Linux (RAGO-COMM), ouverture de session automatique, rapport de mesure.</Description>
+    <URI>\Rago\Boot</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+    </BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="RagoSystem">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>false</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT15M</ExecutionTimeLimit>
+    <Priority>4</Priority>
+  </Settings>
+  <Actions Context="RagoSystem">
+    <Exec>
+      <Command>%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe</Command>
+      <Arguments>-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\Rago\bin\rago-boot.ps1"</Arguments>
+    </Exec>
+  </Actions>
+</Task>

@@ -1,12 +1,12 @@
 ---
 type: module
 tags: [module, phase-A]
-maj: 2026-11-13
+maj: 2026-11-14
 statut: EN COURS
 ---
 # M3 Chiffrement LUKS
 
-> Phase A. Statut : **EN COURS** — code écrit le 13/11/2026, testé sur disques virtuels seulement (conteneur, loop devices avec TPM émulé, VM qemu UEFI + TPM émulé) ; **jamais testé sur vrai matériel**. Fusionné dans `main` (PR #6, 13/11). Étendu le 13/11 par [[M4 Updates A-B]] (un jeton TPM par entrée de démarrage, lié aussi à PCR 11) : branche `claude/project-thread-8u4yl8`, PR #7 vers `main` à relire. **En attente de matériel** : le vrai déverrouillage automatique par un TPM matériel (fTPM AMD / PTT Intel) et un vrai firmware, la passphrase tapée au vrai clavier au démarrage, mkinitcpio réel, le débit et les FPS. Retour à [[Projet]], carte [[Architecture]], voir [[Sécurité et boot]].
+> Phase A. Statut : **EN COURS** — code écrit le 13/11/2026, testé sur disques virtuels seulement (conteneur, loop devices avec TPM émulé, VM qemu UEFI + TPM émulé) ; **jamais testé sur vrai matériel**. Fusionné dans `main` (PR #6, 13/11). Étendu le 13/11 par [[M4 Updates A-B]] (un jeton TPM par entrée de démarrage, lié aussi à PCR 11) : fusionné dans `main` (PR #7, 13/11). **En attente de matériel** : le vrai déverrouillage automatique par un TPM matériel (fTPM AMD / PTT Intel) et un vrai firmware, la passphrase tapée au vrai clavier au démarrage, mkinitcpio réel, le débit et les FPS. Retour à [[Projet]], carte [[Architecture]], voir [[Sécurité et boot]].
 
 **Objectif.** Disque hôte chiffré, déverrouillé par le TPM au démarrage si le firmware et Secure Boot sont ceux de l'enrôlement, sinon par une passphrase de secours **obligatoire** ; compatible avec l'hibernation du [[Fast OS Switch]] et les deux slots de [[M4 Updates A-B]].
 

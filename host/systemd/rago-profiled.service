@@ -38,7 +38,9 @@ RuntimeDirectoryPreserve=yes
 # Droits : en root, il écrit dans /sys (fichiers root 0644) et ouvre
 # /dev/cpu_dma_latency sans capacité particulière ; CAP_CHOWN sert à donner
 # le socket au groupe rago. Les hooks héritent de ce cadre : M9 (GPU) pourra
-# demander plus de droits, M6 ajoutera ReadWritePaths= pour RAGO-COMM.
+# demander plus de droits. Le hook windows-security (M5) fait monter RAGO-COMM
+# par systemd (run-rago-comm.mount) : le montage arrive dans ce bac à sable sans
+# ReadWritePaths= (vérifié en VM, systemd 255 et 257, 14/11).
 CapabilityBoundingSet=CAP_CHOWN
 NoNewPrivileges=yes
 # /sys et /dev doivent rester écrivables : PAS de ProtectKernelTunables, ni

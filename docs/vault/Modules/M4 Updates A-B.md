@@ -1,12 +1,12 @@
 ---
 type: module
 tags: [module, phase-A]
-maj: 2026-11-13
+maj: 2026-11-14
 statut: EN COURS
 ---
 # M4 Updates A-B
 
-> Phase A. Statut : **EN COURS** — code écrit le 13/11/2026, testé sans matériel seulement (fausses racines, loop devices avec TPM émulé, VM qemu UEFI avec Secure Boot actif et TPM émulé) ; **jamais testé sur vrai matériel**. Branche `claude/project-thread-8u4yl8`, PR #7 vers `main`, à relire par Sofiene avant M5. **En attente de matériel** : vrai firmware et vrai TPM (PCR 0, 7 et 11 mesurés et stables), chaîne shim → systemd-boot (non testée : la VM a la clé MOK dans la db), le noyau Rago dans l'UKI (la VM embarque le noyau Ubuntu), mkinitcpio réel, le temps réel d'une mise à jour. Retour à [[Projet]], carte [[Architecture]], voir [[Sécurité et boot]].
+> Phase A. Statut : **EN COURS** — code écrit le 13/11/2026, testé sans matériel seulement (fausses racines, loop devices avec TPM émulé, VM qemu UEFI avec Secure Boot actif et TPM émulé) ; **jamais testé sur vrai matériel**. Fusionné dans `main` (PR #7, 13/11). **En attente de matériel** : vrai firmware et vrai TPM (PCR 0, 7 et 11 mesurés et stables), chaîne shim → systemd-boot (non testée : la VM a la clé MOK dans la db), le noyau Rago dans l'UKI (la VM embarque le noyau Ubuntu), mkinitcpio réel, le temps réel d'une mise à jour. Retour à [[Projet]], carte [[Architecture]], voir [[Sécurité et boot]].
 
 **Objectif.** Système redondant en deux slots A / B : une mise à jour écrit le slot **inactif**, le redémarrage suivant l'essaie une fois, il devient le défaut s'il démarre, sinon retour automatique sur l'ancien. Chaque slot démarre par **son UKI signée** (fin du trou « devant la machine » de [[M3 Chiffrement LUKS]]).
 
@@ -68,7 +68,10 @@ statut: EN COURS
 - Reprise d'hibernation par une UKI avec Secure Boot (noyau Ubuntu verrouillé en VM).
 - Panne du noyau pendant un essai : sans `panic=` sur la ligne de commande, il faut couper le courant (ensuite retour automatique) ; voir [[Questions ouvertes]].
 
-**Dépend de / relié à :** [[M3 Chiffrement LUKS]] (volumes, TPM), [[M0 Noyau scx_rago]] (clé MOK, noyau, `kernel.conf`), [[Sécurité et boot]], [[M13 Build ISO]] (images signées), [[M6 Fast OS Switch]] (hibernation, entrée à usage unique), [[M12 Installateur]].
+## Exigence pour le micro-Windows (décision du 14/11)
+« passer les cumulatifs courants via -UpdatePath à chaque reconstruction de l'image » : le micro-Windows ne se met pas à jour en ligne ([[M5 Micro-Windows]]) ; quand une mise à jour de Rago reconstruit son image, elle doit intégrer les mises à jour cumulatives du moment (`windows/compile_micro_engine.ps1 -UpdatePath`). Rien n'est codé dans M4 pour ça (M4 met à jour la racine Linux) ; à faire quand la reconstruction de Windows sera conçue ([[Questions ouvertes]]).
+
+**Dépend de / relié à :** [[M3 Chiffrement LUKS]] (volumes, TPM), [[M5 Micro-Windows]] (cumulatifs à chaque reconstruction), [[M0 Noyau scx_rago]] (clé MOK, noyau, `kernel.conf`), [[Sécurité et boot]], [[M13 Build ISO]] (images signées), [[M6 Fast OS Switch]] (hibernation, entrée à usage unique), [[M12 Installateur]].
 
 **Critère de test.** update → boot passif ; échec simulé → rollback auto ; UKI modifiée refusée par Secure Boot.
 
