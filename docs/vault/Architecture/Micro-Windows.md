@@ -17,4 +17,6 @@ Windows réduit à un **moteur de jeu invisible** : pas de bureau, pas d'écran 
 
 **Le mur** : pas de « Windows de quelques Mo » — en dessous de ce qui fait tourner jeu + anti-triche, ça casse.
 
+**Bibliothèque de jeux ([[M7 Bibliothèque partagée]], 14/11)** : les jeux vivent sur une partition NTFS à part, RAGO-LIB (lettre `L:` dans Windows), installés par les clients officiels (Steam, Epic, Riot) dans le micro-Windows ; Linux les liste et dépose des requêtes dans RAGO-COMM. Jamais les deux OS en même temps sur RAGO-LIB : Windows la met hors ligne à chaque arrêt (et la répare au démarrage si elle est marquée « sale »), Linux ne l'écrit que si Windows s'est arrêté proprement et que le volume est propre. Le compte SYSTEM de Windows ne lit rien dans RAGO-LIB (modifiable par le joueur) : la finalisation des jeux se fait dans la session du joueur. Une reconstruction du micro-Windows garde les jeux (côté Windows : métadonnées des clients remises, à vérifier).
+
 Relié à : [[Fast OS Switch]], [[Vanguard On-Demand]], [[Sécurité et boot]], [[M7 Bibliothèque partagée]].
