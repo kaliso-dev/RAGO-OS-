@@ -1,0 +1,3 @@
+# Rago OS : fins de ligne
+# Scripts cmd.exe du micro-Windows (M5) : CRLF sur toutes les machines.
+windows/**/*.cmd text eol=crlf

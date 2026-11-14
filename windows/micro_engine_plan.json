@@ -1,0 +1,556 @@
+{
+  "schema": 1,
+  "doc": "Plan d'ablation du micro-Windows Rago (M5), lu par windows/compile_micro_engine.ps1 et vérifié par windows/tests/test_plan.py. Motifs = jokers PowerShell -like (* et ?), casse ignorée. Une liste keep l'emporte TOUJOURS sur remove. Rien ici ne touche à la pile de sécurité exigée par l'anti-triche (Secure Boot, TPM, VBS, HVCI, IOMMU, Defender, pare-feu, liste de blocage des pilotes vulnérables).",
+  "appx": {
+    "doc": "Étape 1. Les paquets Appx provisionnés (Store / UWP) sont retirés : aucune app grand public, pas de Store, pas d'app Xbox, pas de Cortana, pas de widgets. Gardés : l'interface Sécurité Windows (Microsoft.SecHealthUI, partie visible de la pile de sécurité), les bibliothèques dont elle dépend, les extensions vidéo (AV1, HEVC, VP9, MPEG-2, WebM : comme MediaPlayback, elles peuvent servir aux cinématiques) et la connexion au réseau Xbox (Microsoft.XboxIdentityProvider, Microsoft.Xbox.TCUI : certains jeux Microsoft vendus sur Steam demandent un compte Xbox ; quelques Mo). Les apps système de C:\\Windows\\SystemApps ne sont pas des paquets provisionnés (non retirables par DISM) ; sans explorer.exe elles ne démarrent pas. Conséquence : les jeux du Microsoft Store / Game Pass ne sont pas pris en charge par le micro-Windows.",
+    "remove": [
+      "*"
+    ],
+    "keep": [
+      "Microsoft.SecHealthUI*",
+      "Microsoft.VCLibs*",
+      "Microsoft.UI.Xaml*",
+      "Microsoft.NET.Native*",
+      "Microsoft.WindowsAppRuntime*",
+      "Microsoft.AV1VideoExtension*",
+      "Microsoft.HEVCVideoExtension*",
+      "Microsoft.VP9VideoExtensions*",
+      "Microsoft.MPEG2VideoExtension*",
+      "Microsoft.WebMediaExtensions*",
+      "Microsoft.XboxIdentityProvider*",
+      "Microsoft.Xbox.TCUI*"
+    ]
+  },
+  "capabilities": {
+    "doc": "Étape 2 (Remove-WindowsCapability, puis Remove-WindowsPackage pour les packs de langue : 2 bis). Fonctions à la demande. La doc Microsoft « Available Features on Demand » (2026-02-20) dit des FOD préinstallées : « Don't remove these FODs from the Windows image » (DirectX.Configuration.Database, Microsoft.Wallpapers.Extended, Browser.InternetExplorer, MathRecognizer, Microsoft.Windows.Notepad.System, OneCoreUAP.OneSync, OpenSSH.Client, Microsoft.Windows.PowerShell.ISE, Print.Management.Console, App.StepsRecorder, Print.Fax.Scan, WMIC, Microsoft.Windows.WordPad) : elles sont GARDÉES. Le Lecteur Windows Media hérité est gardé aussi (des jeux anciens s'en servent pour leurs vidéos). Retirées : celles qui ne sont pas dans cette liste et ne servent pas à un hôte de jeu (Assistance rapide, Hello visage, écriture manuscrite, OCR, reconnaissance vocale, Paint / Outil Capture / Visionneuse XPS quand l'édition les a en fonctions). Les langues : Language.Basic / Language.TextToSpeech de la langue principale de l'image sont gardés, ceux des autres langues retirés. Les polices (Language.Fonts.*) sont TOUJOURS gardées : sans elles, les noms de joueurs et le chat en japonais, chinois, coréen… s'affichent en carrés dans les launchers. Les packs de langue (paquets Microsoft-Windows-Client-LanguagePack-Package, médias multilingues) d'une autre langue que celle de l'image sont retirés de la même façon (Remove-WindowsPackage). Les pilotes Ethernet / Wi-Fi en fonctions (retirables d'après Microsoft) sont gardés : le matériel du joueur n'est pas connu à la construction.",
+    "remove": [
+      "App.Support.QuickAssist~*",
+      "Hello.Face.*",
+      "Language.Handwriting~*",
+      "Language.OCR~*",
+      "Language.Speech~*",
+      "Microsoft.Windows.MSPaint~*",
+      "Microsoft.Windows.SnippingTool~*",
+      "XPS.Viewer~*"
+    ],
+    "remove_other_languages": [
+      "Language.Basic~*",
+      "Language.TextToSpeech~*"
+    ],
+    "keep": [
+      "App.StepsRecorder~*",
+      "Browser.InternetExplorer~*",
+      "DirectX.Configuration.Database~*",
+      "Language.Fonts.*",
+      "MathRecognizer~*",
+      "Media.WindowsMediaPlayer~*",
+      "Microsoft.Wallpapers.Extended~*",
+      "Microsoft.Windows.Ethernet.Client*",
+      "Microsoft.Windows.Notepad*",
+      "Microsoft.Windows.PowerShell.ISE~*",
+      "Microsoft.Windows.Sense.Client*",
+      "Microsoft.Windows.Wifi.Client*",
+      "Microsoft.Windows.WordPad~*",
+      "NetFX3~*",
+      "OneCoreUAP.OneSync~*",
+      "OpenSSH.Client~*",
+      "Print.Fax.Scan~*",
+      "Print.Management.Console~*",
+      "VBSCRIPT~*",
+      "Windows.Client.ShellComponents~*",
+      "Windows.Kernel.LA57~*",
+      "WMIC~*"
+    ],
+    "language_packs_other": [
+      "Microsoft-Windows-Client-LanguagePack-Package~*"
+    ]
+  },
+  "features": {
+    "doc": "Étape 2 ter (Disable-WindowsOptionalFeature, sans -Remove). Doc Microsoft : depuis Windows 10, -Remove ne supprime PAS la charge utile sur les éditions client (gardée pour la réinitialisation du PC) : désactiver ne fait donc pas gagner de place, seulement des services, des tâches et de la surface d'attaque (SMB1, PowerShell 2). MediaPlayback (Media Foundation, cinématiques des jeux) et WindowsMediaPlayer (lecteur hérité, vidéos de jeux anciens) ne sont PAS désactivés. NetFx3 (.NET 3.5) est AJOUTÉ depuis la source de l'ISO (sources\\sxs), APRÈS le nettoyage du magasin de composants : activé hors ligne il reste « en attente » et ferait échouer /StartComponentCleanup (0x800F0806, doc Microsoft).",
+    "disable": [
+      "SMB1Protocol",
+      "SMB1Protocol-Client",
+      "SMB1Protocol-Server",
+      "SMB1Protocol-Deprecation",
+      "Printing-PrintToPDFServices-Features",
+      "Printing-XPSServices-Features",
+      "Printing-Foundation-Features",
+      "Printing-Foundation-InternetPrinting-Client",
+      "Printing-Foundation-LPDPrintService",
+      "Printing-Foundation-LPRPortMonitor",
+      "FaxServicesClientPackage",
+      "ScanManagementConsole",
+      "Xps-Foundation-Xps-Viewer",
+      "TIFFIFilter",
+      "WorkFolders-Client",
+      "MicrosoftWindowsPowerShellV2Root",
+      "MicrosoftWindowsPowerShellV2",
+      "Internet-Explorer-Optional-*",
+      "MSRDC-Infrastructure",
+      "Recall"
+    ],
+    "enable_from_source": [
+      "NetFx3"
+    ],
+    "keep": [
+      "NetFx3",
+      "NetFx4*",
+      "WCF-*",
+      "MediaPlayback",
+      "DirectPlay",
+      "LegacyComponents",
+      "Windows-Defender*",
+      "SearchEngine-Client-Package",
+      "Microsoft-Hyper-V*",
+      "HypervisorPlatform",
+      "VirtualMachinePlatform",
+      "Containers*",
+      "Microsoft-Windows-Subsystem-Linux",
+      "WindowsMediaPlayer"
+    ]
+  },
+  "drivers": {
+    "doc": "Étape 4. DISM ne retire QUE les pilotes tiers (oemN.inf) : les pilotes inbox ne sont pas retirables proprement (les effacer à la main casse la base de pilotes DRIVERS de l'image) et ne coûtent rien en RAM (PnP ne charge que ceux du matériel présent). On retire donc les pilotes tiers des classes inutiles à un hôte de jeu, on GARDE stockage/NVMe, GPU, réseau, entrée, TPM, et on peut AJOUTER ceux du joueur (-DriverPath). Une image LTSC neuve n'a en général aucun pilote tiers.",
+    "remove_oem_classes": [
+      "Printer",
+      "PrintQueue",
+      "Image",
+      "Modem",
+      "MultiPortSerial",
+      "SmartCardReader",
+      "Fax"
+    ],
+    "keep_classes": [
+      "SCSIAdapter",
+      "HDC",
+      "DiskDrive",
+      "Volume",
+      "Display",
+      "Net",
+      "NetService",
+      "NetTrans",
+      "HIDClass",
+      "Keyboard",
+      "Mouse",
+      "USB",
+      "SecurityDevices",
+      "System",
+      "Bluetooth",
+      "MEDIA",
+      "AudioEndpoint",
+      "XnaComposite",
+      "Firmware",
+      "SoftwareComponent",
+      "Extension"
+    ]
+  },
+  "services": {
+    "doc": "Étape 5. Start=4 (désactivé) dans la ruche SYSTEM hors ligne. Seulement le bruit / l'interface. La liste never_touch est vérifiée par le script : il refuse de démarrer si un service protégé est dans disable. Les services anti-triche (Vanguard vgc/vgk, EasyAntiCheat, BattlEye) n'existent pas encore dans l'image (installés avec le jeu) : leur type de démarrage reste celui que pose leur installateur. Le service des rapports d'erreurs (WerSvc) n'est plus coupé : le guide Microsoft des services d'IoT Enterprise dit de ne pas le couper ; l'envoi des rapports est coupé par la stratégie Windows Error Reporting\\Disabled.",
+    "disable": [
+      {
+        "name": "WSearch",
+        "why": "indexeur de recherche (RAM, E/S)"
+      },
+      {
+        "name": "DiagTrack",
+        "why": "télémétrie (Expériences des utilisateurs connectés)"
+      },
+      {
+        "name": "dmwappushservice",
+        "why": "télémétrie (routage des messages push WAP)"
+      },
+      {
+        "name": "diagnosticshub.standardcollector.service",
+        "why": "collecteur de diagnostic"
+      },
+      {
+        "name": "Spooler",
+        "why": "spouleur d'impression"
+      },
+      {
+        "name": "PrintNotify",
+        "why": "notifications d'imprimante"
+      },
+      {
+        "name": "Fax",
+        "why": "fax"
+      },
+      {
+        "name": "SysMain",
+        "why": "préchargement en RAM (SuperFetch) ; bible v7. Le guide Microsoft des services d'IoT Enterprise conseille de ne pas le couper : à mesurer (temps de chargement)"
+      },
+      {
+        "name": "wuauserv",
+        "why": "Windows Update (bible v7 : moteur reconstruit, pas mis à jour en ligne) : les correctifs arrivent en reconstruisant l'image avec -UpdatePath"
+      },
+      {
+        "name": "UsoSvc",
+        "why": "orchestrateur des mises à jour (et leur interface) ; le guide Microsoft des services d'IoT Enterprise conseille de ne pas le couper (va avec la question Windows Update)"
+      },
+      {
+        "name": "WaaSMedicSvc",
+        "why": "réparateur de Windows Update (le réactiverait) ; le guide Microsoft des services d'IoT Enterprise conseille de ne pas le couper (va avec la question Windows Update)"
+      },
+      {
+        "name": "DoSvc",
+        "why": "optimisation de distribution des mises à jour (pair à pair)"
+      },
+      {
+        "name": "wisvc",
+        "why": "programme Windows Insider"
+      },
+      {
+        "name": "MapsBroker",
+        "why": "cartes hors ligne"
+      },
+      {
+        "name": "lfsvc",
+        "why": "géolocalisation"
+      },
+      {
+        "name": "RetailDemo",
+        "why": "mode démo magasin"
+      },
+      {
+        "name": "PcaSvc",
+        "why": "assistant de compatibilité (fenêtres surgissantes)"
+      }
+    ],
+    "never_touch": [
+      "WinDefend",
+      "WdNisSvc",
+      "WdFilter",
+      "WdBoot",
+      "WdNisDrv",
+      "Sense",
+      "SecurityHealthService",
+      "wscsvc",
+      "mpssvc",
+      "BFE",
+      "KeyIso",
+      "SamSs",
+      "VaultSvc",
+      "TPM",
+      "tpm",
+      "hvservice",
+      "hvcrash",
+      "Winmgmt",
+      "Schedule",
+      "EventLog",
+      "RpcSs",
+      "RpcEptMapper",
+      "DcomLaunch",
+      "PlugPlay",
+      "Power",
+      "LSM",
+      "gpsvc",
+      "ProfSvc",
+      "Dhcp",
+      "Dnscache",
+      "NlaSvc",
+      "netprofm",
+      "nsi",
+      "Netman",
+      "WlanSvc",
+      "iphlpsvc",
+      "BITS",
+      "CryptSvc",
+      "W32Time",
+      "Audiosrv",
+      "AudioEndpointBuilder",
+      "hidserv",
+      "BthServ",
+      "BTAGService",
+      "XboxGipSvc",
+      "ClipSVC",
+      "LicenseManager",
+      "sppsvc",
+      "TokenBroker",
+      "TrustedInstaller",
+      "DPS",
+      "WdiServiceHost",
+      "WdiSystemHost",
+      "vgc",
+      "vgk",
+      "EasyAntiCheat",
+      "EasyAntiCheat_EOS",
+      "BEService",
+      "BEDaisy"
+    ]
+  },
+  "registry": {
+    "doc": "Ruches hors ligne : SYSTEM (ControlSet courant lu dans Select\\Current, écrit {CS}), SOFTWARE, DEFAULT (profil des nouveaux comptes, Users\\Default\\NTUSER.DAT). Le pagefile, le shell Winlogon et l'hibernation viennent des paramètres du script. La base de sécurité (VBS + HVCI configurés, sans verrou UEFI, pour que les profils compat_max / perf restent commutables) est vérifiée par le script et par windows/tests/test_plan.py.",
+    "set": [
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\DeviceGuard",
+        "name": "EnableVirtualizationBasedSecurity",
+        "type": "DWord",
+        "value": 1,
+        "why": "VBS configuré (profil compat_max par défaut, exigé par Vanguard On-Demand)"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\DeviceGuard",
+        "name": "RequirePlatformSecurityFeatures",
+        "type": "DWord",
+        "value": 1,
+        "why": "VBS avec Secure Boot (1) ; la protection DMA / IOMMU est mesurée et signalée, pas exigée, pour que VBS démarre aussi sans elle"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\DeviceGuard",
+        "name": "Locked",
+        "type": "DWord",
+        "value": 0,
+        "why": "pas de verrou UEFI : le profil perf doit pouvoir couper l'hyperviseur"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity",
+        "name": "Enabled",
+        "type": "DWord",
+        "value": 1,
+        "why": "HVCI (intégrité de la mémoire) configuré"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity",
+        "name": "Locked",
+        "type": "DWord",
+        "value": 0,
+        "why": "pas de verrou UEFI"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\CI\\Config",
+        "name": "VulnerableDriverBlocklistEnable",
+        "type": "DWord",
+        "value": 1,
+        "why": "liste de blocage des pilotes vulnérables de Microsoft, dans les deux profils"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\BitLocker",
+        "name": "PreventDeviceEncryption",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas de chiffrement automatique BitLocker (bible : pas de BitLocker ; moteur sans données, aucun écran de récupération)"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\Session Manager\\Power",
+        "name": "HiberbootEnabled",
+        "type": "DWord",
+        "value": 0,
+        "why": "démarrage rapide coupé : il verrouille les partitions partagées (M6)"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\TimeZoneInformation",
+        "name": "RealTimeIsUniversal",
+        "type": "QWord",
+        "value": 1,
+        "why": "horloge matérielle en UTC, comme Linux : pas de décalage d'heure à chaque switch (réglage non documenté comme pris en charge par Microsoft, mais utilisé dans sa propre doc Azure : à vérifier sur la machine)"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\CrashControl",
+        "name": "CrashDumpEnabled",
+        "type": "DWord",
+        "value": 3,
+        "why": "petit vidage mémoire seulement (compatible avec un pagefile minimal)"
+      },
+      {
+        "hive": "SYSTEM",
+        "path": "{CS}\\Control\\CrashControl",
+        "name": "AutoReboot",
+        "type": "DWord",
+        "value": 1,
+        "why": "écran bleu → redémarrage → retour sur Linux (entrée à usage unique consommée)"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows\\Personalization",
+        "name": "NoLockScreen",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas d'écran de verrouillage"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+        "name": "DisableCAD",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas de Ctrl+Alt+Suppr avant l'ouverture de session"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+        "name": "EnableFirstLogonAnimation",
+        "type": "DWord",
+        "value": 0,
+        "why": "pas d'animation « Bonjour » à la première session"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows\\OOBE",
+        "name": "DisablePrivacyExperience",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas d'écran de confidentialité"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows\\DataCollection",
+        "name": "AllowTelemetry",
+        "type": "DWord",
+        "value": 0,
+        "why": "télémétrie au minimum : 0 (Sécurité) n'est appliqué que par Enterprise, Education et IoT ; Pro et Famille le lisent comme 1 (données requises). Le service DiagTrack est coupé dans tous les cas"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows\\Windows Error Reporting",
+        "name": "Disabled",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas d'envoi de rapports d'erreurs"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows\\CloudContent",
+        "name": "DisableWindowsConsumerFeatures",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas d'apps suggérées installées toutes seules"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows\\CloudContent",
+        "name": "DisableSoftLanding",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas d'astuces"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows\\CloudContent",
+        "name": "DisableCloudOptimizedContent",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas de contenu poussé"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows\\WindowsUpdate\\AU",
+        "name": "NoAutoUpdate",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas de mise à jour automatique (en plus des services coupés)"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows NT\\SystemRestore",
+        "name": "DisableSR",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas de points de restauration (moteur reconstruit, pas réparé)"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows NT\\SystemRestore",
+        "name": "DisableConfig",
+        "type": "DWord",
+        "value": 1,
+        "why": "pas de configuration de la restauration système"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\PassportForWork",
+        "name": "Enabled",
+        "type": "DWord",
+        "value": 0,
+        "why": "pas d'invitation à configurer Windows Hello (aucune authentification visible)"
+      },
+      {
+        "hive": "SOFTWARE",
+        "path": "Policies\\Microsoft\\Windows\\GameDVR",
+        "name": "AllowGameDVR",
+        "type": "DWord",
+        "value": 0,
+        "why": "pas de capture Game DVR en fond (l'app Xbox est retirée)"
+      },
+      {
+        "hive": "DEFAULT",
+        "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+        "name": "SilentInstalledAppsEnabled",
+        "type": "DWord",
+        "value": 0,
+        "why": "pas d'apps installées en silence"
+      },
+      {
+        "hive": "DEFAULT",
+        "path": "Software\\Microsoft\\Windows\\CurrentVersion\\ContentDeliveryManager",
+        "name": "SystemPaneSuggestionsEnabled",
+        "type": "DWord",
+        "value": 0,
+        "why": "pas de suggestions"
+      },
+      {
+        "hive": "DEFAULT",
+        "path": "Software\\Microsoft\\Windows\\CurrentVersion\\UserProfileEngagement",
+        "name": "ScoobeSystemSettingEnabled",
+        "type": "DWord",
+        "value": 0,
+        "why": "pas d'écran « Terminons la configuration de votre appareil »"
+      },
+      {
+        "hive": "DEFAULT",
+        "path": "Control Panel\\Accessibility\\StickyKeys",
+        "name": "Flags",
+        "type": "String",
+        "value": "506",
+        "why": "pas de fenêtre des touches rémanentes après 5 × Maj en jeu"
+      },
+      {
+        "hive": "DEFAULT",
+        "path": "Control Panel\\Accessibility\\ToggleKeys",
+        "name": "Flags",
+        "type": "String",
+        "value": "58",
+        "why": "pas de fenêtre des touches bascule"
+      },
+      {
+        "hive": "DEFAULT",
+        "path": "Control Panel\\Accessibility\\Keyboard Response",
+        "name": "Flags",
+        "type": "String",
+        "value": "122",
+        "why": "pas de fenêtre des touches filtres"
+      }
+    ],
+    "delete": [
+      {
+        "hive": "DEFAULT",
+        "path": "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        "name": "OneDriveSetup",
+        "why": "pas d'installation de OneDrive à la première session (Windows 11 Pro la lance depuis le profil par défaut)"
+      }
+    ]
+  },
+  "files_remove": {
+    "doc": "Étape 8 (et 4 bis pour WinRE). Chemins relatifs à la racine de l'image montée. Uniquement des sauvegardes, caches, journaux et l'environnement de récupération : rien dont le démarrage dépend. La purge totale de WinSxS façon « tiny11 core » n'est PAS faite (elle casse comctl32 v6, les assemblages VC++ 2005/2008 et .NET).",
+    "paths": [
+      "Windows\\System32\\Recovery\\Winre.wim",
+      "Windows\\WinSxS\\Backup\\*",
+      "Windows\\WinSxS\\ManifestCache\\*",
+      "Windows\\WinSxS\\Temp\\PendingDeletes\\*",
+      "Windows\\Logs\\*",
+      "Windows\\Temp\\*",
+      "Windows\\Panther\\*",
+      "Windows\\SoftwareDistribution\\Download\\*",
+      "ProgramData\\Microsoft\\Windows\\WER\\*"
+    ]
+  }
+}
