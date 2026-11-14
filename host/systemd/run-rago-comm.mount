@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — partition d'échange RAGO-COMM (FAT32), montée À LA DEMANDE (M5).
+#
+# Pas de [Install] : jamais montée au démarrage. Le hook windows-security
+# (M5, appelé par rago-profiled prepare-switch) la démarre, écrit, puis
+# l'arrête ; M6 fera de même autour du switch. Linux et le micro-Windows ne
+# l'ont donc jamais ouverte en même temps (une FAT montée pendant que Windows
+# l'écrit serait corrompue au retour d'hibernation).
+#
+# Conflicts=sleep.target : si elle est montée au moment d'une mise en veille
+# ou d'une hibernation, systemd la démonte d'abord.
+#
+# Fichiers à l'intérieur : root seulement (0600 / 0700). Le nom de l'unité
+# suit le chemin (/run/rago/comm) ; pour une autre partition, surcharger What=
+# dans /etc/systemd/system/run-rago-comm.mount.d/.
+
+[Unit]
+Description=Rago OS : partition d'échange RAGO-COMM (montage à la demande)
+Documentation=file:///usr/share/doc/rago/windows/README.md
+Conflicts=sleep.target
+Before=sleep.target
+
+[Mount]
+What=/dev/disk/by-label/RAGO-COMM
+Where=/run/rago/comm
+Type=vfat
+Options=rw,nosuid,nodev,noexec,noatime,uid=0,gid=0,fmask=0177,dmask=0077,utf8,shortname=mixed,errors=remount-ro,flush
+DirectoryMode=0700
+TimeoutSec=10

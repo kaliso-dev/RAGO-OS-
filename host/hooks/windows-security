@@ -1,0 +1,345 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — hook « windows-security » (module M5, micro-Windows).
+#
+# Posé dans /usr/lib/rago/hooks/windows-security. Appelé par rago-profiled
+# (M14) : `rago-profiled prepare-switch --id <jeu>` lance
+#
+#     windows-security set
+#
+# avec RAGO_PROFILE_ID=<jeu>, RAGO_WINDOWS_SECURITY=compat_max|perf et le
+# profil effectif du jeu en JSON sur l'entrée standard (contrat :
+# profiles/README.md). Le hook écrit ce profil dans la partition d'échange
+# RAGO-COMM (FAT32), fichier security/profile.json. Au démarrage suivant du
+# micro-Windows, la tâche C:\Rago\bin\rago-security.ps1 (SYSTEM) le lit et
+# l'applique (VBS / HVCI / hyperviseur), puis écrit security/status.json.
+#
+# Autres commandes (sans rago-profiled) :
+#     windows-security status    profil demandé + dernier état écrit par Windows (JSON)
+#     windows-security --help
+#
+# RAGO-COMM n'est montée que le temps de l'écriture (unité systemd
+# run-rago-comm.mount, à la demande) : jamais laissée montée pendant une
+# hibernation ou un switch, Windows et Linux ne l'ouvrent jamais en même temps.
+# Si elle est déjà montée (par M6, par exemple), le hook écrit dedans et la
+# laisse montée.
+#
+# Réglages : /etc/rago/rago-comm.conf (lignes CLÉ=valeur, voir
+# host/rago-comm.conf). Le démon vide l'environnement : seul ce fichier compte.
+#
+# Codes de sortie : 0 écrit, 1 erreur (RAGO-COMM absente, écriture impossible),
+# 2 entrée refusée (valeur inconnue, profil incohérent, usage).
+#
+# Aucune dissimulation : le profil dit seulement à Windows quel réglage de
+# sécurité officiel utiliser ; l'état réel est mesuré et renvoyé tel quel.
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+CONF_DEFAULT = "/etc/rago/rago-comm.conf"
+DEFAULTS = {
+    "RAGO_COMM_DIR": "/run/rago/comm",
+    # systemd : démarre / arrête l'unité ci-dessous ; none : RAGO-COMM doit déjà
+    # être montée sur RAGO_COMM_DIR (tests, ou montage géré ailleurs).
+    "RAGO_COMM_MOUNT": "systemd",
+    "RAGO_COMM_UNIT": "run-rago-comm.mount",
+    "RAGO_COMM_DEVICE": "/dev/disk/by-label/RAGO-COMM",
+    "RAGO_COMM_REQUIRE_VFAT": "1",
+    "RAGO_COMM_SYSTEMCTL": "/usr/bin/systemctl",
+}
+VALUES = ("compat_max", "perf")
+FALLBACK_ID = "_fallback"  # profil sûr par défaut de rago-profiled
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+MAX_STDIN = 64 * 1024
+SYSTEMCTL_TIMEOUT = 10  # s ; rago-profiled coupe le hook à 15 s
+LAYOUT = {"schema": 1, "layout": 1, "name": "RAGO-COMM",
+          "doc": "Partition d'echange Linux <-> micro-Windows de Rago OS (M5/M6). "
+                 "Ne pas ouvrir depuis Linux pendant que Windows tourne."}
+
+
+class Refused(Exception):
+    """Entrée refusée (code 2)."""
+
+
+class Failed(Exception):
+    """Erreur d'exécution (code 1)."""
+
+
+def log(msg):
+    print(msg, file=sys.stderr)
+
+
+# --- réglages -----------------------------------------------------------------------------
+
+def load_conf(path):
+    conf = dict(DEFAULTS)
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return conf
+    # Le hook tourne en root : un fichier de réglages modifiable par d'autres
+    # pourrait le faire écrire n'importe où.
+    if st.st_uid not in (0, os.geteuid()) or st.st_mode & 0o022:
+        raise Failed(f"{path} doit appartenir à root et ne pas être modifiable par le groupe ou les autres")
+    with open(path, encoding="utf-8") as f:
+        for n, line in enumerate(f, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                raise Failed(f"{path}:{n} : ligne sans « = »")
+            k, v = line.split("=", 1)
+            k, v = k.strip(), v.strip()
+            if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+                v = v[1:-1]
+            if k not in DEFAULTS:
+                raise Failed(f"{path}:{n} : réglage inconnu {k}")
+            conf[k] = v
+    if conf["RAGO_COMM_MOUNT"] not in ("systemd", "none"):
+        raise Failed("RAGO_COMM_MOUNT doit valoir systemd ou none")
+    if not os.path.isabs(conf["RAGO_COMM_DIR"]):
+        raise Failed("RAGO_COMM_DIR doit être un chemin absolu")
+    return conf
+
+
+# --- montage de RAGO-COMM -------------------------------------------------------------------
+
+def _unescape(s):
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), s)
+
+
+def mount_info(path):
+    """(type, source) du montage le plus haut exactement sur `path`, sinon None."""
+    path = os.path.realpath(path)
+    found = None
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as f:
+            for line in f:
+                left, _, right = line.partition(" - ")
+                fields = left.split()
+                if len(fields) < 5 or _unescape(fields[4]) != path:
+                    continue
+                r = right.split()
+                found = (r[0] if r else "?", _unescape(r[1]) if len(r) > 1 else "?")
+    except OSError:
+        return None
+    return found
+
+
+def systemctl(conf, verb):
+    cmd = [conf["RAGO_COMM_SYSTEMCTL"], "--quiet", verb, conf["RAGO_COMM_UNIT"]]
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                           timeout=SYSTEMCTL_TIMEOUT)
+    except FileNotFoundError:
+        raise Failed(f"{cmd[0]} introuvable")
+    except subprocess.TimeoutExpired:
+        raise Failed(f"systemctl {verb} {conf['RAGO_COMM_UNIT']} : délai de {SYSTEMCTL_TIMEOUT} s dépassé")
+    if r.returncode != 0:
+        why = (r.stderr or r.stdout).strip().splitlines()
+        raise Failed(f"systemctl {verb} {conf['RAGO_COMM_UNIT']} : code {r.returncode}"
+                     + (f" ({why[-1]})" if why else ""))
+
+
+class Comm:
+    """RAGO-COMM montée pour la durée d'un bloc `with`."""
+
+    def __init__(self, conf):
+        self.conf = conf
+        self.dir = conf["RAGO_COMM_DIR"]
+        self.started = False
+
+    def __enter__(self):
+        conf = self.conf
+        info = mount_info(self.dir)
+        if info is None:
+            if conf["RAGO_COMM_MOUNT"] != "systemd":
+                raise Failed(f"RAGO-COMM n'est pas montée sur {self.dir} (RAGO_COMM_MOUNT=none)")
+            dev = conf["RAGO_COMM_DEVICE"]
+            if not os.path.exists(dev):
+                raise Failed(f"partition RAGO-COMM introuvable ({dev}) : à créer en FAT32 nommée "
+                             "RAGO-COMM (M12, ou à la main, voir la note M5 du vault)")
+            systemctl(conf, "start")
+            self.started = True
+            info = mount_info(self.dir)
+            if info is None:
+                self._stop_quietly()
+                raise Failed(f"{conf['RAGO_COMM_UNIT']} démarrée mais rien n'est monté sur {self.dir}")
+        fstype, source = info
+        if conf["RAGO_COMM_REQUIRE_VFAT"] != "0" and fstype != "vfat":
+            self._stop_quietly()
+            raise Failed(f"{self.dir} est en {fstype} ({source}) : RAGO-COMM doit être en FAT32 (vfat)")
+        return self
+
+    def _stop_quietly(self):
+        if self.started:
+            try:
+                systemctl(self.conf, "stop")
+            except Failed as e:
+                log(f"avertissement : {e}")
+            self.started = False
+
+    def __exit__(self, exc_type, exc, tb):
+        if not self.started:
+            return False
+        if exc_type is not None:
+            # Erreur pendant l'écriture : démonter sans masquer l'erreur d'origine.
+            self._stop_quietly()
+            return False
+        # Démontée tout de suite : les écritures partent sur le disque et rien
+        # ne reste ouvert pendant l'hibernation / le switch.
+        os.sync()
+        self.started = False
+        systemctl(self.conf, "stop")
+        return False
+
+    def path(self, *parts):
+        return os.path.join(self.dir, *parts)
+
+
+def fsync_dir(d):
+    try:
+        fd = os.open(d, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def write_json(path, obj):
+    """Écriture sûre : fichier temporaire, fsync, renommage, fsync du dossier."""
+    d = os.path.dirname(path)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    data = (json.dumps(obj, indent=2, ensure_ascii=True, sort_keys=False) + "\n").encode("ascii")
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
+    fsync_dir(d)
+
+
+def read_json(path):
+    try:
+        # utf-8-sig : Windows PowerShell 5.1 peut écrire une marque BOM.
+        with open(path, encoding="utf-8-sig") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        return {"_erreur": f"{os.path.basename(path)} illisible : {e}"}
+
+
+# --- commandes ------------------------------------------------------------------------------
+
+def utc_now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def parse_request(env, stdin_text):
+    value = env.get("RAGO_WINDOWS_SECURITY", "")
+    if value not in VALUES:
+        raise Refused(f"RAGO_WINDOWS_SECURITY={value!r} : attendu compat_max ou perf")
+    pid = env.get("RAGO_PROFILE_ID", "")
+    if pid != FALLBACK_ID and not ID_RE.match(pid):
+        raise Refused(f"RAGO_PROFILE_ID={pid!r} : identifiant de profil invalide")
+    if len(stdin_text.encode("utf-8")) > MAX_STDIN:
+        raise Refused(f"profil sur l'entrée standard trop gros (> {MAX_STDIN} octets)")
+    try:
+        prof = json.loads(stdin_text) if stdin_text.strip() else {}
+    except ValueError as e:
+        raise Refused(f"profil JSON illisible sur l'entrée standard : {e}")
+    if not isinstance(prof, dict):
+        raise Refused("le profil sur l'entrée standard doit être un objet JSON")
+    # Le profil et les variables doivent dire la même chose.
+    if "id" in prof and prof["id"] != pid:
+        raise Refused(f"profil incohérent : id {prof['id']!r} ≠ RAGO_PROFILE_ID {pid!r}")
+    if "windows_security" in prof and prof["windows_security"] != value:
+        raise Refused(f"profil incohérent : windows_security {prof['windows_security']!r} ≠ {value!r}")
+    if "couche" in prof and prof["couche"] != "switch":
+        raise Refused(f"profil de couche {prof['couche']!r} : seul un jeu de couche switch passe par le micro-Windows")
+    return {
+        "schema": 1,
+        "kind": "rago-windows-security",
+        "security": value,
+        "profile_id": pid,
+        "written_at": utc_now(),
+        "writer": "rago windows-security hook (M5)",
+        "profile": prof,
+    }
+
+
+def cmd_set(conf, env, stdin_text):
+    req = parse_request(env, stdin_text)
+    with Comm(conf) as comm:
+        if not os.path.exists(comm.path("rago-comm.json")):
+            write_json(comm.path("rago-comm.json"), LAYOUT)
+        write_json(comm.path("security", "profile.json"), req)
+    # Dernière ligne = reprise dans le rapport de rago-profiled.
+    print(f"{req['security']} écrit dans RAGO-COMM (security/profile.json, profil {req['profile_id']})")
+    return 0
+
+
+def cmd_status(conf):
+    with Comm(conf) as comm:
+        out = {
+            "requested": read_json(comm.path("security", "profile.json")),
+            "windows_status": read_json(comm.path("security", "status.json")),
+            "reports": {},
+        }
+        rep = comm.path("reports")
+        if os.path.isdir(rep):
+            for name in sorted(os.listdir(rep)):
+                if name.endswith(".json"):
+                    out["reports"][name] = read_json(os.path.join(rep, name))
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0
+
+
+USAGE = """usage : windows-security set | status | --help
+  set     (appelé par rago-profiled prepare-switch) écrit RAGO_WINDOWS_SECURITY
+          et le profil JSON lu sur l'entrée standard dans RAGO-COMM
+          (security/profile.json)
+  status  affiche le profil demandé et le dernier état écrit par le micro-Windows
+Réglages : /etc/rago/rago-comm.conf (RAGO_COMM_DIR, RAGO_COMM_MOUNT, RAGO_COMM_UNIT,
+           RAGO_COMM_DEVICE, RAGO_COMM_REQUIRE_VFAT)"""
+
+
+def main(argv, env, stdin):
+    if len(argv) != 2 or argv[1] in ("-h", "--help"):
+        print(USAGE, file=sys.stdout if len(argv) == 2 else sys.stderr)
+        return 0 if len(argv) == 2 else 2
+    try:
+        # RAGO_COMM_CONF : seulement pour les tests (rago-profiled vide l'environnement).
+        conf = load_conf(env.get("RAGO_COMM_CONF", CONF_DEFAULT))
+        if argv[1] == "set":
+            return cmd_set(conf, env, stdin.read(MAX_STDIN + 1))
+        if argv[1] == "status":
+            return cmd_status(conf)
+        print(USAGE, file=sys.stderr)
+        return 2
+    except Refused as e:
+        log(f"refusé : {e}")
+        return 2
+    except Failed as e:
+        log(f"erreur : {e}")
+        return 1
+    except OSError as e:
+        log(f"erreur : {e}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv, os.environ, sys.stdin))

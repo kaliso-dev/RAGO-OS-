@@ -73,9 +73,9 @@ Règles communes : le hook tourne en root ; lui et son dossier doivent apparteni
 - `gpu-clocks apply` au début d'un jeu dont le profil a `gpu_clocks.mode` = `max` ou `fixed` (et à chaque changement du jeu actif). Variables : `RAGO_PROFILE_ID`, `RAGO_GPU_CLOCKS_MODE` (`max` | `fixed`), `RAGO_GPU_CORE_MHZ`, `RAGO_GPU_MEM_MHZ` (si fixés).
 - `gpu-clocks restore` quand plus aucun jeu ne demande de surcharge (et à la reprise après un arrêt brutal). Pas de variable : remettre les horloges de base de M9.
 
-### `windows-security` (à fournir par M5 / M6)
+### `windows-security` (fourni par M5 : `host/hooks/windows-security`)
 
-- `windows-security set`, appelé par `rago-profiled prepare-switch --id <jeu>` juste avant le switch. Variables : `RAGO_PROFILE_ID`, `RAGO_WINDOWS_SECURITY` (`compat_max` | `perf`). Le hook écrit ce profil dans RAGO-COMM pour que le micro-Windows règle VBS / HVCI au démarrage.
+- `windows-security set`, appelé par `rago-profiled prepare-switch --id <jeu>` juste avant le switch. Variables : `RAGO_PROFILE_ID`, `RAGO_WINDOWS_SECURITY` (`compat_max` | `perf`). Le hook écrit ce profil dans RAGO-COMM (`security/profile.json`) pour que le micro-Windows règle l'hyperviseur (donc VBS / HVCI) au démarrage. Installé par `sudo host/setup_windows_security.sh install` ; détail : `windows/README.md`.
 - Code de sortie de `prepare-switch` : 0 transmis, 4 hook absent (M5/M6 pas installés), 1 erreur, 3 démon injoignable.
 
 ## Contribuer à la base communautaire
