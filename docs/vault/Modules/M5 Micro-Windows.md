@@ -6,7 +6,7 @@ statut: EN COURS
 ---
 # M5 Micro-Windows
 
-> Phase B. Statut : **EN COURS** — code écrit le 14/11/2026. **Jamais testé sur matériel. Jamais exécuté (scripts Windows, conteneur Linux) ; ablation réelle + boot + jeu réel + taille finale en attente de l'ISO et de la machine de Sofiene.** Testés : le côté Linux (hook, RAGO-COMM : conteneur + VM qemu sur deux noyaux) et la lecture statique des fichiers Windows. Branche `claude/project-thread-pq1zgv`, une seule PR vers `main`, à relire par Sofiene avant [[M7 Bibliothèque partagée]]. Retour à [[Projet]], carte [[Architecture]].
+> Phase B. Statut : **EN COURS** — code écrit le 14/11/2026. **Jamais testé sur matériel. Jamais exécuté (scripts Windows, conteneur Linux) ; ablation réelle + boot + jeu réel + taille finale en attente de l'ISO et de la machine de Sofiene.** Testés : le côté Linux (hook, RAGO-COMM : conteneur + VM qemu sur deux noyaux) et la lecture statique des fichiers Windows. Branche `claude/project-thread-pq1zgv`, une seule PR vers `main` (PR #8), à relire par Sofiene avant [[M7 Bibliothèque partagée]]. Retour à [[Projet]], carte [[Architecture]].
 
 **Objectif.** Windows réduit à un moteur de jeu invisible (pas de bureau, pas d'écran de connexion), aligné sur l'anti-triche moderne : la sécurité exigée reste active, son état réel est mesuré et renvoyé à Linux. Aucune dissimulation. BYOL strict : Rago ne distribue jamais Windows, les scripts refusent de tourner sans l'ISO du joueur. Voir [[Micro-Windows]], [[Vanguard On-Demand]].
 
