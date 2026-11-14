@@ -60,7 +60,7 @@ demande, packs de langue, fonctionnalités, pilotes qui seraient retirés).
 ## 2. Construire
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\compile_micro_engine.ps1 -SourcePath D:\Iso\Win11_25H2_French_x64.iso -DriverPath D:\Pilotes -RedistPath D:\Redist
+powershell -ExecutionPolicy Bypass -File .\compile_micro_engine.ps1 -SourcePath D:\Iso\Win11_25H2_French_x64.iso -UpdatePath D:\MisesAJour -DriverPath D:\Pilotes -RedistPath D:\Redist
 ```
 
 Options utiles :
@@ -71,11 +71,21 @@ Options utiles :
   et, si besoin, le DirectX de juin 2010 décompressé (`DXSETUP.exe`). Rien
   n'est téléchargé : tu les prends chez Microsoft ;
 - `-UpdatePath` : mises à jour cumulatives (`.msu` / `.cab` du catalogue
-  Microsoft Update) intégrées à l'image. Windows Update est coupé dans le
-  micro-Windows : c'est **la** façon de le mettre à jour (reconstruire) ;
+  Microsoft Update) intégrées à l'image. **À passer à chaque reconstruction**
+  avec les cumulatifs du mois (décision du 14/11) : le micro-Windows ne se met
+  pas à jour en ligne, c'est **la** façon de le mettre à jour. Sans cette
+  option, la construction continue mais avertit. Mettre à la racine du
+  dossier (pas de sous-dossier) les `.msu` que le catalogue donne pour le mois :
+  la mise à jour cumulative de Windows avec ses « checkpoint », et celle de
+  .NET (nom avec « ndp »). Le script passe à DISM la cumulative la plus récente
+  (DISM prend les checkpoint dont il a besoin dans le même dossier) et
+  applique celle de .NET après .NET 3.5, comme le documente Microsoft ;
 - `-FinalCompression recovery` : image `.esd` plus petite (LZMS), au lieu de
   `max` (`.wim`, LZX) ;
-- `-Hibernation off` : pas d'hibernation de Windows (voir plus bas) ;
+- `-Hibernation full` : garde l'hibernation de Windows, pour un essai
+  seulement (défaut `off`, voir plus bas). Avec elle, Windows peut s'hiberner
+  tout seul (batterie très faible d'un portable, minuteries) pendant que Linux
+  ne sait rien : ne jamais toucher à RAGO-COMM depuis Linux dans ce cas ;
 - `-PageFileMB 1024` : fichier d'échange fixe (256 à 65536 Mio) ;
 - `-PlayerName`, `-ComputerName`, `-UILanguage`, `-InputLocale`, `-TimeZone` ;
 - `-MakeIso` : ISO amorçable en plus du dossier de média ;
@@ -192,13 +202,14 @@ Le lancement direct du jeu viendra avec M6.
   `micro-engine.json` (réglages de la construction), `comm\` (point de
   montage de RAGO-COMM si Windows ne lui donne pas de lettre).
 - `C:\ProgramData\Rago\` : `logs\`, `reports\m5-engine-<date>.json`,
-  `security-state.json`, `security-status.json`, `firstboot-<phase>.json`.
+  `security-state.json`, `security-status.json`, `firstboot-<phase>.json`,
+  `windows-update-guard.json`.
 - Journal du shell : `%LOCALAPPDATA%\Rago\logs\shell.log`.
 
 ## Critère de test de M5 (à faire sur le PC de jeu)
 
-1. `compile_micro_engine.ps1 -PlanOnly`, puis la construction ; garder
-   `m5-build-report.json`.
+1. `compile_micro_engine.ps1 -PlanOnly`, puis la construction avec
+   `-UpdatePath` (cumulatifs du mois) ; garder `m5-build-report.json`.
 2. Installation, ordre de démarrage remis, `status` depuis Linux.
 3. `reports/m5-engine.json` : RAM au repos (cible ~300-500 Mo), pas
    d'`explorer.exe` ni de `SearchIndexer`, taille de `C:` sans
@@ -208,16 +219,29 @@ Le lancement direct du jeu viendra avec M6.
 5. Rapporter les fichiers JSON (aucun ne contient de clé de produit ni de
    mot de passe).
 
-L'hibernation de Windows est gardée par défaut (demande du 14/11 : « le
-switch M6 s'en sert ») : `hiberfil.sys` fait environ 40 % de la RAM et n'est
-pas compté dans la cible de taille. `-Hibernation off` la coupe.
+L'hibernation de Windows est **coupée par défaut** (décision du 14/11) : le
+micro-Windows est sans état (démarrage à froid, `shutdown /r` pour revenir à
+Linux), il ne s'hiberne jamais lui-même ; l'hibernation du switch est celle de
+Linux (M6). `hiberfil.sys` prendrait environ 40 % de la RAM sur le disque pour
+rien. `-Hibernation full` la garde pour un essai (voir l'avertissement plus
+haut) ; reprendre Windows depuis
+l'hibernation est un arbitrage disque / vitesse à étudier en M8, pas le défaut.
 
 ## Limites connues
 
 - Jeux du Microsoft Store / Game Pass : pas pris en charge (Store retiré).
-- Windows Update coupé : correctifs en reconstruisant avec `-UpdatePath`.
-  Les définitions de Defender sont prises à chaque démarrage directement chez
-  Microsoft (`MpCmdRun -SignatureUpdate -MMPC`, à vérifier sur la machine).
+- Pas de mise à jour en ligne (décision du 14/11) : le service Windows Update
+  (`wuauserv`) est coupé et la stratégie `NoAutoUpdate` posée ; l'orchestrateur
+  (`UsoSvc`) et le réparateur (`WaaSMedicSvc`) sont **gardés**, comme le
+  conseille le guide Microsoft des services d'IoT Enterprise. Si le réparateur
+  rallume `wuauserv`, `rago-boot.ps1` le recoupe à chaque démarrage par le
+  gestionnaire de services (`Set-Service`, effet immédiat), l'arrête (30 s au
+  plus) et l'écrit dans `windows-update-guard.json` (repris dans le rapport,
+  champ `windows_update`, avec le mode de démarrage vu par le gestionnaire de
+  services). Les correctifs passent par `-UpdatePath` à chaque
+  reconstruction. Les définitions de Defender sont prises à chaque démarrage
+  directement chez Microsoft (`MpCmdRun -SignatureUpdate -MMPC`, à vérifier
+  sur la machine).
 - Pilotes inbox : DISM ne sait pas les retirer (seuls les pilotes tiers le
   sont) ; ils ne coûtent rien en RAM.
 - Désactiver une fonctionnalité Windows ne libère pas de place sur une

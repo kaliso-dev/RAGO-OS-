@@ -18,7 +18,8 @@
          -AllowOlderBuild ; une autre édition seulement si -Edition / -Index la
          demande (avertissement ; licence des éditions IoT / LTSC) ;
       1. l'édition choisie est exportée dans une image de travail et montée ;
-         option -UpdatePath : mises à jour cumulatives (.msu / .cab) du joueur ;
+         option -UpdatePath : mises à jour cumulatives (.msu / .cab) du joueur
+         (celle de .NET, « ndp », seulement après .NET 3.5, étape 7) ;
       2. paquets Appx provisionnés (Store / UWP) retirés ;
       3. fonctions à la demande, langues et packs de langue en trop retirés,
          fonctionnalités inutiles désactivées (SMB1, impression, fax, PowerShell 2...) ;
@@ -62,8 +63,19 @@
 .PARAMETER FinalCompression
     max (LZX, install.wim, montable, défaut) ou recovery (LZMS solide,
     install.esd, plus petit, non montable).
+.PARAMETER UpdatePath
+    Dossier des mises à jour cumulatives (.msu / .cab) à intégrer à l'image.
+    EXIGÉ à chaque reconstruction (décision du 14/11) : Windows Update est
+    coupé au runtime, l'image n'a que les correctifs qu'on lui donne ici.
+    Sans lui, la construction continue avec un avertissement. Les .msu à la
+    racine du dossier (pas de sous-dossier) : la mise à jour cumulative de
+    Windows la plus récente est passée à DISM, qui prend les « checkpoint »
+    dont il a besoin dans le même dossier ; celle de .NET (nom avec « ndp »)
+    est appliquée après .NET 3.5 (ordre documenté par Microsoft).
 .PARAMETER Hibernation
-    full (défaut : le Fast OS Switch de M6 s'en sert) ou off.
+    off (défaut, décision du 14/11 : le micro-Windows est sans état, il ne
+    s'hiberne jamais lui-même ; l'hibernation du switch est celle de Linux, M6)
+    ou full (essai : hiberfil.sys prend ~40 % de la RAM sur le disque).
 .PARAMETER PageFileMB
     Fichier d'échange de taille fixe (défaut 1024 Mio).
 .PARAMETER InstallToDisk
@@ -74,7 +86,7 @@
 .EXAMPLE
     .\compile_micro_engine.ps1 -SourcePath D:\Iso\Win11_25H2_French_x64.iso -PlanOnly
 .EXAMPLE
-    .\compile_micro_engine.ps1 -SourcePath D:\Iso\Win11_25H2_French_x64.iso -DriverPath D:\Pilotes -RedistPath D:\Redist
+    .\compile_micro_engine.ps1 -SourcePath D:\Iso\Win11_25H2_French_x64.iso -UpdatePath D:\MisesAJour -DriverPath D:\Pilotes -RedistPath D:\Redist
 #>
 [CmdletBinding()]
 param(
@@ -92,7 +104,7 @@ param(
     [switch]$NoNetFx3,
     [ValidateSet('max', 'recovery')][string]$FinalCompression = 'max',
     [ValidateRange(256, 65536)][int]$PageFileMB = 1024,
-    [ValidateSet('full', 'off')][string]$Hibernation = 'full',
+    [ValidateSet('off', 'full')][string]$Hibernation = 'off',
     [string]$PlayerName = 'RagoPlayer',
     [string]$ComputerName = 'RAGO-ENGINE',
     [string]$UILanguage,
@@ -185,6 +197,9 @@ foreach ($opt in @('UpdatePath', 'DriverPath', 'RedistPath')) {
         if (-not (Test-Path -LiteralPath $v -PathType Container)) { throw ('-{0} : dossier introuvable ({1})' -f $opt, $v) }
         Set-Variable -Name $opt -Value (Resolve-Path -LiteralPath $v).Path
     }
+}
+if (-not $UpdatePath -and -not $PlanOnly) {
+    Warn 'pas de -UpdatePath : image sans les correctifs du mois, et Windows Update est coupé au runtime (décision du 14/11). Passe les cumulatifs courants à chaque reconstruction.'
 }
 $DismLog = Join-Path $LogDir ('dism-{0}.log' -f $stamp)
 $DismExe = Join-Path $env:SystemRoot 'System32\dism.exe'
@@ -452,10 +467,55 @@ try {
     $mounted = $true
     $report.steps.inventory_before = Get-RagoInventory $Mount
 
+    # Ordre de Microsoft (« Update Windows installation media with Dynamic
+    # Update ») : mise à jour cumulative, nettoyage, .NET 3.5, puis la mise à
+    # jour cumulative de .NET (fichier « ndp » du catalogue), ici à l'étape 7.
+    # Windows 11 24H2 et plus : on passe à DISM le FICHIER de la mise à jour
+    # cumulative la plus récente (numéro KB le plus haut) ; DISM prend dans le
+    # même dossier les mises à jour « checkpoint » dont il a besoin (pages
+    # Microsoft « checkpoint cumulative updates »). Jamais le dossier entier :
+    # DISM ajouterait chaque .msu à part (checkpoint déjà intégrée → échec) et
+    # fouillerait les sous-dossiers (le .NET partirait trop tôt).
+    $dotnetUpdates = @()
     if ($UpdatePath -and -not $PlanOnly) {
-        Say ('mises à jour du joueur : {0}' -f $UpdatePath)
-        Add-WindowsPackage -Path $Mount -PackagePath $UpdatePath -ScratchDirectory $Scratch -LogPath $DismLog | Out-Null
-        $report.steps.updates = @(Get-ChildItem -LiteralPath $UpdatePath -File | Where-Object { $_.Extension -in '.msu', '.cab' } | ForEach-Object { $_.Name })
+        $all = @(Get-ChildItem -LiteralPath $UpdatePath -File -Recurse | Where-Object { $_.Extension -in '.msu', '.cab' })
+        $nested = @($all | Where-Object { $_.DirectoryName.TrimEnd('\') -ne $UpdatePath.TrimEnd('\') })
+        if ($nested.Count -gt 0) {
+            throw ('-UpdatePath : .msu / .cab dans des sous-dossiers ({0}) : mets-les tous à la racine du dossier' -f (($nested | ForEach-Object { $_.FullName }) -join ', '))
+        }
+        $dotnetUpdates = @($all | Where-Object { $_.Name -like '*ndp*' } | Sort-Object Name)
+        $osMsu = @($all | Where-Object { $_.Name -notlike '*ndp*' -and $_.Extension -eq '.msu' })
+        $osCab = @($all | Where-Object { $_.Name -notlike '*ndp*' -and $_.Extension -eq '.cab' } | Sort-Object Name)
+        $target = $null
+        if ($osMsu.Count -gt 0) {
+            # Numéro KB le plus haut ; sans numéro lisible, le plus gros fichier.
+            $kbOf = { param($f) if ($f.Name -match '(?i)kb(\d+)') { return [int64]$Matches[1] } else { return [int64](-1) } }
+            $cands = @($osMsu | ForEach-Object { [pscustomobject]@{ File = $_; Kb = (& $kbOf $_); Size = $_.Length } })
+            $target = ($cands | Sort-Object Kb, Size | Select-Object -Last 1).File
+        }
+        $report.steps.updates = [ordered]@{
+            target = $(if ($target) { $target.Name } else { $null })
+            other_msu_in_folder = @($osMsu | Where-Object { $_.FullName -ne $(if ($target) { $target.FullName } else { '' }) } | ForEach-Object { $_.Name })
+            cab_applied = @(); cab_failed = @()
+            dotnet = @($dotnetUpdates | ForEach-Object { $_.Name }); dotnet_applied = @(); dotnet_failed = @()
+        }
+        if ($all.Count -eq 0) { Warn ('-UpdatePath : aucun .msu / .cab dans {0}' -f $UpdatePath) }
+        foreach ($c in $osCab) {
+            Say ('paquet du joueur : {0}' -f $c.Name)
+            try {
+                Add-WindowsPackage -Path $Mount -PackagePath $c.FullName -ScratchDirectory $Scratch -LogPath $DismLog | Out-Null
+                $report.steps.updates.cab_applied += $c.Name
+            } catch {
+                $report.steps.updates.cab_failed += ('{0} : {1}' -f $c.Name, $_.Exception.Message)
+                Warn ('paquet {0} : {1}' -f $c.Name, $_.Exception.Message)
+            }
+        }
+        if ($target) {
+            Say ('mise à jour cumulative de Windows : {0} (checkpoint prises par DISM dans le même dossier)' -f $target.Name)
+            Add-WindowsPackage -Path $Mount -PackagePath $target.FullName -ScratchDirectory $Scratch -LogPath $DismLog | Out-Null
+        } elseif ($all.Count -gt 0) {
+            Warn '-UpdatePath : pas de mise à jour cumulative de Windows (.msu sans « ndp »)'
+        }
     }
 
     # --- 2. Appx ---------------------------------------------------------------------------------------
@@ -617,6 +677,18 @@ try {
         } else {
             $report.steps.netfx3 = 'sauté : pas de sources\sxs'
             Warn '.NET 3.5 non ajouté (pas de sources\sxs) : certains vieux jeux / launchers en ont besoin'
+        }
+    }
+    # Mise à jour cumulative de .NET APRÈS .NET 3.5 (sinon .NET 3.5 resterait
+    # à la version de l'ISO : Windows Update est coupé au runtime).
+    foreach ($f in $dotnetUpdates) {
+        Say ('mise à jour cumulative de .NET : {0}' -f $f.Name)
+        try {
+            Add-WindowsPackage -Path $Mount -PackagePath $f.FullName -ScratchDirectory $Scratch -LogPath $DismLog | Out-Null
+            $report.steps.updates.dotnet_applied += $f.Name
+        } catch {
+            $report.steps.updates.dotnet_failed += ('{0} : {1}' -f $f.Name, $_.Exception.Message)
+            Warn ('mise à jour de .NET {0} : {1}' -f $f.Name, $_.Exception.Message)
         }
     }
     Say 'étape 8 : sauvegardes, caches, journaux, WinRE'

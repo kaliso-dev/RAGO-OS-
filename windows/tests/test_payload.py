@@ -267,6 +267,73 @@ class HookContract(unittest.TestCase):
         self.assertRegex(hook, r"compat_max.*perf|perf.*compat_max")
 
 
+class Decisions1411(unittest.TestCase):
+    """Décisions de Sofiene du 14/11 : hibernation coupée par défaut, pas de Windows Update en ligne."""
+
+    def test_hibernation_off_by_default(self):
+        comp = read(os.path.join(WIN, "compile_micro_engine.ps1"))
+        self.assertIn("[ValidateSet('off', 'full')][string]$Hibernation = 'off'", comp)
+        self.assertIn("hibernation = $Hibernation", comp)
+        fb_raw = read(os.path.join(PAYLOAD, "setup", "firstboot.ps1"))
+        block = fb_raw[fb_raw.index("Step 'hibernation' {"):]
+        block = block[:block.index("\n}\n") + 3]
+        # Défaut « off » si micro-engine.json ne dit rien ; « full » seulement sur demande explicite.
+        self.assertIn("$hib = 'off'", block)
+        self.assertIn("$info.hibernation -eq 'full'", block)
+        self.assertIn("@('/hibernate', 'off')", block)
+        self.assertLess(block.index("$hib = 'off'"), block.index("$info.hibernation -eq 'full'"))
+        self.assertIn("HiberbootEnabled", block)
+
+    def test_windows_update_guard(self):
+        boot = read(os.path.join(BIN, "rago-boot.ps1"))
+        self.assertIn("function Set-RagoNoOnlineUpdate", boot)
+        # Appelé aussi en -SettingsOnly (avant le return).
+        self.assertLess(boot.index("try { Set-RagoNoOnlineUpdate }"), boot.index("if ($SettingsOnly) { return }"))
+        guard = boot[boot.index("function Set-RagoNoOnlineUpdate"):boot.index("try { Set-RagoAutoLogon }")]
+        # Le gestionnaire de services (effet immédiat), pas une écriture du registre
+        # (qui ne compterait qu'au démarrage suivant).
+        self.assertIn("Set-Service -Name wuauserv -StartupType Disabled", guard)
+        self.assertNotIn("\\Services\\", guard)
+        # Arrêt borné (Stop-Service attendrait sans limite).
+        self.assertNotIn("Stop-Service", guard)
+        self.assertIn("WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))", guard)
+        self.assertIn(r"'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'", guard)
+        # Le fichier est écrit même si une étape échoue.
+        fin = guard[guard.index("} finally {"):]
+        self.assertIn("'windows-update-guard.json'", fin)
+        # Seul wuauserv est touché, et il est bien dans services.disable du plan.
+        for svc in ("usosvc", "waasmedicsvc", "wersvc", "windefend", "mpssvc"):
+            self.assertNotIn(svc, guard.lower(), "le garde ne touche qu'à wuauserv : %s reste" % svc)
+        touched = set(re.findall(r"-Name (\w+)", guard)) - {"NoAutoUpdate"}
+        self.assertEqual(touched, {"wuauserv"})
+        import json
+        with open(os.path.join(WIN, "micro_engine_plan.json"), encoding="utf-8") as f:
+            plan = json.load(f)
+        self.assertIn("wuauserv", [s["name"] for s in plan["services"]["disable"]])
+        rep = read(os.path.join(BIN, "rago-report.ps1"))
+        self.assertIn("'windows-update-guard.json'", rep)
+        self.assertIn("windows_update = $wu", rep)
+        self.assertIn("Win32_Service", rep[rep.index("$wu = [ordered]@{"):rep.index("windows_update = $wu")])
+
+    def test_dotnet_update_after_netfx3(self):
+        comp = read(os.path.join(WIN, "compile_micro_engine.ps1"))
+        netfx = comp.index("-FeatureName NetFx3")
+        dotnet = comp.index("foreach ($f in $dotnetUpdates)")
+        first = comp.index("Add-WindowsPackage -Path $Mount -PackagePath $target.FullName")
+        self.assertLess(first, comp.index("'/StartComponentCleanup'"))
+        self.assertLess(netfx, dotnet)
+        self.assertIn("$_.Name -like '*ndp*'", comp)
+        self.assertIn("$_.Name -notlike '*ndp*'", comp)
+        # Jamais le dossier entier à DISM (checkpoint ajoutées une à une, sous-dossiers fouillés).
+        self.assertNotIn("-PackagePath $UpdatePath", comp)
+        self.assertIn("Get-ChildItem -LiteralPath $UpdatePath -File -Recurse", comp)
+
+    def test_update_path_warned_when_missing(self):
+        comp = read(os.path.join(WIN, "compile_micro_engine.ps1"))
+        self.assertIn(".PARAMETER UpdatePath", comp)
+        self.assertIn("if (-not $UpdatePath -and -not $PlanOnly) {", comp)
+
+
 class NoSecrets(unittest.TestCase):
     def test_no_product_key_or_password(self):
         key = re.compile(r"\b[A-Z0-9]{5}(?:-[A-Z0-9]{5}){4}\b")

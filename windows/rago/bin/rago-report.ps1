@@ -93,6 +93,28 @@ try { $disk.compact_os = Test-RagoCompactOS } catch { $errors += ('CompactOS : '
 try { $disk.compact_os_query = ((& "$env:SystemRoot\System32\compact.exe" /CompactOS:query) | Out-String).Trim() }
 catch { $errors += ('compact : ' + $_.Exception.Message) }
 
+# --- Windows Update (décision du 14/11 : pas de mise à jour en ligne au runtime) -----------------
+# Deux vues : Start dans le registre (ce qui vaudra au prochain démarrage) et le
+# mode de démarrage du gestionnaire de services (ce qui vaut maintenant).
+$wu = [ordered]@{
+    wuauserv_start = $null; wuauserv_start_mode = $null; wuauserv_status = $null; no_auto_update = $null
+    usosvc_start = $null; usosvc_start_mode = $null; waasmedicsvc_start = $null; waasmedicsvc_start_mode = $null; guard = $null
+}
+try {
+    foreach ($n in @(@('wuauserv', 'wuauserv_start'), @('UsoSvc', 'usosvc_start'), @('WaaSMedicSvc', 'waasmedicsvc_start'))) {
+        $v = Get-ItemProperty -LiteralPath ('HKLM:\SYSTEM\CurrentControlSet\Services\' + $n[0]) -Name Start -ErrorAction SilentlyContinue
+        if ($null -ne $v) { $wu[$n[1]] = [int]$v.Start }
+        $c = Get-CimInstance -ClassName Win32_Service -Filter ("Name = '{0}'" -f $n[0]) -ErrorAction SilentlyContinue
+        if ($null -ne $c) { $wu[($n[1] + '_mode')] = [string]$c.StartMode }
+    }
+    $s = Get-Service -Name wuauserv -ErrorAction SilentlyContinue
+    if ($null -ne $s) { $wu.wuauserv_status = [string]$s.Status }
+    $a = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoUpdate -ErrorAction SilentlyContinue
+    if ($null -ne $a) { $wu.no_auto_update = [int]$a.NoAutoUpdate }
+    # Ce que rago-boot.ps1 a trouvé au démarrage (wuauserv rallumé par le réparateur ?).
+    $wu.guard = Read-RagoJson (Join-Path (Get-RagoDataDir) 'windows-update-guard.json')
+} catch { $errors += ('Windows Update : ' + $_.Exception.Message) }
+
 # --- démarrage ----------------------------------------------------------------------------
 $boot = [ordered]@{ boot_id = $null; seconds_kernel_to_report_start = $null; seconds_kernel_to_shell = $null; boot_time_ms_event = $null }
 try {
@@ -130,6 +152,7 @@ $report = [ordered]@{
     services_running_count = $services.Count
     services_running = $services
     disk = $disk
+    windows_update = $wu
     boot = $boot
     security = $sec
     build = $info

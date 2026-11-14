@@ -84,9 +84,10 @@ function Read-RagoJson {
 }
 
 # Racine de RAGO-COMM (« R:\ » ou « C:\Rago\comm\ »), ou $null si absente.
-# M5 : Windows démarre à froid et s'arrête complètement (démarrage rapide coupé),
-# donc son cache FAT n'est jamais périmé. M6 (hibernation de Windows) devra
-# DÉMONTER RAGO-COMM avant d'hiberner : Linux y écrit pendant que Windows dort.
+# Windows démarre à froid et s'arrête complètement (démarrage rapide coupé,
+# hibernation coupée par défaut, décision du 14/11), donc son cache FAT n'est
+# jamais périmé. Si un jour Windows hibernait (étude de M8), il faudrait
+# DÉMONTER RAGO-COMM avant : Linux y écrit pendant que Windows dort.
 function Get-RagoCommRoot {
     $vols = @(Get-CimInstance -ClassName Win32_Volume -Filter ("Label = '{0}'" -f $script:CommLabel))
     if ($vols.Count -eq 0) {

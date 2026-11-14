@@ -15,8 +15,9 @@
       1. dossiers de Rago verrouillés (C:\Rago et C:\ProgramData\Rago :
          SYSTEM et Administrateurs seuls en écriture, ils sont lancés en SYSTEM) ;
       2. tâche planifiée \Rago\Boot (C:\Rago\tasks\rago-boot.xml) ;
-      3. hibernation : gardée (type full, le Fast OS Switch de M6 s'en sert)
-         ou coupée ; démarrage rapide (« Fast Startup ») toujours coupé ;
+      3. hibernation coupée (défaut : le micro-Windows est sans état, seul Linux
+         hiberne au switch) ou, si la construction l'a demandé (-Hibernation
+         full), gardée ; démarrage rapide (« Fast Startup ») toujours coupé ;
       4. fichier d'échange : taille fixe minimale (pagefile_mb) ;
       5. démarrage de Windows : pas de réparation automatique en boucle (WinRE
          est retiré de l'image), pas d'attente au menu ;
@@ -94,7 +95,10 @@ Step 'tache_boot' {
 # 3. hibernation / démarrage rapide ------------------------------------------------------------------
 Step 'hibernation' {
     $powercfg = Join-Path $sys32 'powercfg.exe'
-    if ($info.hibernation -eq 'full') {
+    # Sans réglage lisible : coupée (défaut de compile_micro_engine.ps1).
+    $hib = 'off'
+    if ($info.PSObject.Properties.Name -contains 'hibernation' -and $info.hibernation -eq 'full') { $hib = 'full' }
+    if ($hib -eq 'full') {
         Invoke-Native $powercfg @('/hibernate', 'on') | Out-Null
         Invoke-Native $powercfg @('/hibernate', '/type', 'full') | Out-Null
     } else {
@@ -103,7 +107,7 @@ Step 'hibernation' {
     # Démarrage rapide = arrêt hybride : Windows laisserait ses volumes « en cours d'utilisation ».
     $p = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power'
     New-ItemProperty -LiteralPath $p -Name HiberbootEnabled -PropertyType DWord -Value 0 -Force | Out-Null
-    return ('hibernation {0}, démarrage rapide coupé' -f $info.hibernation)
+    return ('hibernation {0}, démarrage rapide coupé' -f $hib)
 }
 
 # 4. fichier d'échange : taille fixe ------------------------------------------------------------------

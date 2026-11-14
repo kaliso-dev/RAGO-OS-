@@ -145,7 +145,7 @@
     ]
   },
   "services": {
-    "doc": "Étape 5. Start=4 (désactivé) dans la ruche SYSTEM hors ligne. Seulement le bruit / l'interface. La liste never_touch est vérifiée par le script : il refuse de démarrer si un service protégé est dans disable. Les services anti-triche (Vanguard vgc/vgk, EasyAntiCheat, BattlEye) n'existent pas encore dans l'image (installés avec le jeu) : leur type de démarrage reste celui que pose leur installateur. Le service des rapports d'erreurs (WerSvc) n'est plus coupé : le guide Microsoft des services d'IoT Enterprise dit de ne pas le couper ; l'envoi des rapports est coupé par la stratégie Windows Error Reporting\\Disabled.",
+    "doc": "Étape 5. Start=4 (désactivé) dans la ruche SYSTEM hors ligne. Seulement le bruit / l'interface. La liste never_touch est vérifiée par le script : il refuse de démarrer si un service protégé est dans disable. Les services anti-triche (Vanguard vgc/vgk, EasyAntiCheat, BattlEye) n'existent pas encore dans l'image (installés avec le jeu) : leur type de démarrage reste celui que pose leur installateur. Windows Update (décision du 14/11) : wuauserv coupé + stratégie NoAutoUpdate, mais l'orchestrateur (UsoSvc) et le réparateur (WaaSMedicSvc) GARDÉS comme le conseille le guide Microsoft des services d'IoT Enterprise (ils sont dans never_touch) ; rago-boot.ps1 recoupe wuauserv au démarrage si le réparateur l'a rallumé, et rago-report.ps1 rapporte l'état réel. Le service des rapports d'erreurs (WerSvc) n'est plus coupé : le guide Microsoft des services d'IoT Enterprise dit de ne pas le couper ; l'envoi des rapports est coupé par la stratégie Windows Error Reporting\\Disabled.",
     "disable": [
       {
         "name": "WSearch",
@@ -181,19 +181,11 @@
       },
       {
         "name": "wuauserv",
-        "why": "Windows Update (bible v7 : moteur reconstruit, pas mis à jour en ligne) : les correctifs arrivent en reconstruisant l'image avec -UpdatePath"
-      },
-      {
-        "name": "UsoSvc",
-        "why": "orchestrateur des mises à jour (et leur interface) ; le guide Microsoft des services d'IoT Enterprise conseille de ne pas le couper (va avec la question Windows Update)"
-      },
-      {
-        "name": "WaaSMedicSvc",
-        "why": "réparateur de Windows Update (le réactiverait) ; le guide Microsoft des services d'IoT Enterprise conseille de ne pas le couper (va avec la question Windows Update)"
+        "why": "Windows Update : pas de mise à jour en ligne au runtime (décision du 14/11, avec la stratégie NoAutoUpdate) ; les correctifs sont intégrés à la construction avec -UpdatePath (cumulatifs courants à chaque reconstruction)"
       },
       {
         "name": "DoSvc",
-        "why": "optimisation de distribution des mises à jour (pair à pair)"
+        "why": "optimisation de distribution des mises à jour (pair à pair) : inutile sans mise à jour en ligne"
       },
       {
         "name": "wisvc",
@@ -275,7 +267,9 @@
       "EasyAntiCheat",
       "EasyAntiCheat_EOS",
       "BEService",
-      "BEDaisy"
+      "BEDaisy",
+      "UsoSvc",
+      "WaaSMedicSvc"
     ]
   },
   "registry": {
@@ -447,7 +441,7 @@
         "name": "NoAutoUpdate",
         "type": "DWord",
         "value": 1,
-        "why": "pas de mise à jour automatique (en plus des services coupés)"
+        "why": "pas de mise à jour automatique en ligne (décision du 14/11), même si le réparateur de Windows Update rallume wuauserv"
       },
       {
         "hive": "SOFTWARE",

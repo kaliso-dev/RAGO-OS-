@@ -68,7 +68,10 @@ statut: EN COURS
 - Reprise d'hibernation par une UKI avec Secure Boot (noyau Ubuntu verrouillé en VM).
 - Panne du noyau pendant un essai : sans `panic=` sur la ligne de commande, il faut couper le courant (ensuite retour automatique) ; voir [[Questions ouvertes]].
 
-**Dépend de / relié à :** [[M3 Chiffrement LUKS]] (volumes, TPM), [[M0 Noyau scx_rago]] (clé MOK, noyau, `kernel.conf`), [[Sécurité et boot]], [[M13 Build ISO]] (images signées), [[M6 Fast OS Switch]] (hibernation, entrée à usage unique), [[M12 Installateur]].
+## Exigence pour le micro-Windows (décision du 14/11)
+« passer les cumulatifs courants via -UpdatePath à chaque reconstruction de l'image » : le micro-Windows ne se met pas à jour en ligne ([[M5 Micro-Windows]]) ; quand une mise à jour de Rago reconstruit son image, elle doit intégrer les mises à jour cumulatives du moment (`windows/compile_micro_engine.ps1 -UpdatePath`). Rien n'est codé dans M4 pour ça (M4 met à jour la racine Linux) ; à faire quand la reconstruction de Windows sera conçue ([[Questions ouvertes]]).
+
+**Dépend de / relié à :** [[M3 Chiffrement LUKS]] (volumes, TPM), [[M5 Micro-Windows]] (cumulatifs à chaque reconstruction), [[M0 Noyau scx_rago]] (clé MOK, noyau, `kernel.conf`), [[Sécurité et boot]], [[M13 Build ISO]] (images signées), [[M6 Fast OS Switch]] (hibernation, entrée à usage unique), [[M12 Installateur]].
 
 **Critère de test.** update → boot passif ; échec simulé → rollback auto ; UKI modifiée refusée par Secure Boot.
 

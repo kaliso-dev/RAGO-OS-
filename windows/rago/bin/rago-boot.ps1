@@ -11,6 +11,12 @@
       1. garde l'ouverture de session automatique du joueur (AutoAdminLogon,
          sans compteur) : aucun écran de connexion, jamais ;
       2. garde le shell Rago à la place d'explorer.exe (Winlogon\Shell) ;
+      2 bis. pas de mise à jour en ligne (décision du 14/11) : wuauserv coupé et
+         stratégie NoAutoUpdate ; le réparateur de Windows Update, gardé, peut
+         rallumer wuauserv : il est recoupé par le gestionnaire de services
+         (effet immédiat) et c'est noté
+         (C:\ProgramData\Rago\windows-update-guard.json, rapport M5) ;
+         étapes 1, 2 et 2 bis aussi en -SettingsOnly (installation) ;
       3. applique le profil de sécurité demandé par Linux
          (rago-security.ps1 -Apply ; peut redémarrer une fois sur Windows) ;
       4. si Windows ne redémarre pas : rapport de mesure M5 (rago-report.ps1),
@@ -26,7 +32,7 @@
 #>
 [CmdletBinding()]
 param(
-    # Étapes 1 et 2 seulement (firstboot.ps1, pendant l'installation).
+    # Étapes 1, 2 et 2 bis seulement (firstboot.ps1, pendant l'installation).
     [switch]$SettingsOnly
 )
 
@@ -68,8 +74,63 @@ function Set-RagoShell {
     }
 }
 
+# Pas de mise à jour en ligne au runtime (décision du 14/11) : wuauserv coupé +
+# stratégie NoAutoUpdate ; l'orchestrateur et le réparateur de Windows Update
+# sont gardés (guide Microsoft des services d'IoT Enterprise) et jamais touchés
+# ici. Si le réparateur a rallumé wuauserv, on le recoupe PAR LE GESTIONNAIRE DE
+# SERVICES (Set-Service : effet immédiat ; une écriture directe dans le registre
+# ne compterait qu'au démarrage suivant), on l'arrête sans attendre plus de 30 s,
+# et on le note. Les correctifs passent par -UpdatePath (construction).
+function Set-RagoNoOnlineUpdate {
+    $guard = [ordered]@{
+        boot_id = (Get-RagoBootId); checked_at = (Get-RagoUtcNow)
+        wuauserv_start_mode_found = $null; wuauserv_recut = $false; wuauserv_start_mode_after = $null
+        wuauserv_stopped = $null; no_auto_update_reset = $false; errors = @()
+    }
+    try {
+        $svc = Get-CimInstance -ClassName Win32_Service -Filter "Name = 'wuauserv'" -ErrorAction SilentlyContinue
+        if ($null -ne $svc) {
+            $guard.wuauserv_start_mode_found = [string]$svc.StartMode
+            if ([string]$svc.StartMode -ne 'Disabled') {
+                try {
+                    Set-Service -Name wuauserv -StartupType Disabled
+                    $guard.wuauserv_recut = $true
+                    Write-RagoLog ('wuauserv retrouvé en {0} (réparateur de Windows Update ?) : recoupé' -f $svc.StartMode) 'WARN'
+                } catch { $guard.errors += ('Set-Service wuauserv : ' + $_.Exception.Message) }
+            }
+            $s = Get-Service -Name wuauserv -ErrorAction SilentlyContinue
+            if ($null -ne $s -and $s.Status -ne 'Stopped') {
+                try {
+                    if ($s.Status -ne 'StopPending') { $s.Stop() }
+                    $s.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+                    $guard.wuauserv_stopped = $true
+                } catch {
+                    $guard.wuauserv_stopped = $false
+                    $guard.errors += ('arrêt de wuauserv : ' + $_.Exception.Message)
+                }
+            }
+            $after = Get-CimInstance -ClassName Win32_Service -Filter "Name = 'wuauserv'" -ErrorAction SilentlyContinue
+            if ($null -ne $after) { $guard.wuauserv_start_mode_after = [string]$after.StartMode }
+        }
+        $au = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
+        if (-not (Test-Path -LiteralPath $au)) { New-Item -Path $au -Force | Out-Null }
+        $v = Get-ItemProperty -LiteralPath $au -Name NoAutoUpdate -ErrorAction SilentlyContinue
+        if ($null -eq $v -or [int]$v.NoAutoUpdate -ne 1) {
+            New-ItemProperty -LiteralPath $au -Name NoAutoUpdate -PropertyType DWord -Value 1 -Force | Out-Null
+            $guard.no_auto_update_reset = $true
+            Write-RagoLog 'stratégie NoAutoUpdate reposée' 'WARN'
+        }
+    } catch {
+        $guard.errors += $_.Exception.Message
+    } finally {
+        foreach ($e in $guard.errors) { Write-RagoLog ('Windows Update : ' + $e) 'ERROR' }
+        Write-RagoJson -Path (Join-Path (Get-RagoDataDir) 'windows-update-guard.json') -InputObject $guard
+    }
+}
+
 try { Set-RagoAutoLogon } catch { Write-RagoLog ('ouverture automatique : ' + $_.Exception.Message) 'ERROR' }
 try { Set-RagoShell } catch { Write-RagoLog ('shell : ' + $_.Exception.Message) 'ERROR' }
+try { Set-RagoNoOnlineUpdate } catch { Write-RagoLog ('Windows Update : ' + $_.Exception.Message) 'ERROR' }
 if ($SettingsOnly) { return }
 
 # Fin d'installation pas faite (SetupComplete.cmd non lancé par Windows, ou compte

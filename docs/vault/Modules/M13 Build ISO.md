@@ -1,7 +1,7 @@
 ---
 type: module
 tags: [module, phase-C]
-maj: 2026-11-13
+maj: 2026-11-14
 statut: À FAIRE
 ---
 # M13 Build ISO
@@ -21,7 +21,9 @@ statut: À FAIRE
 
 **Pour M4 (13/11).** Paquets : `systemd-ukify` (avec python-pefile), systemd-boot et son systemd-stub, `sbsigntools`, `rsync`, `openssl`, `tpm2-tools`. `rago-update` (`host/manage_atomic_updates.sh`) se met en place sur la machine installée, après M0 + M3 (`setup`). Plus tard, les mises à jour par image (`rago-update apply --image`) attendent une archive tar signée d'une racine, produite ici ; la clé qui la signe n'est pas décidée ([[Questions ouvertes]]). Détail : [[M4 Updates A-B]].
 
-**Dépend de / relié à :** [[M12 Installateur]], [[Architecture]], [[M4 Updates A-B]]
+**EXIGENCE pour le micro-Windows (décision du 14/11).** « passer les cumulatifs courants via -UpdatePath à chaque reconstruction de l'image » : le micro-Windows ne se met pas à jour en ligne ([[M5 Micro-Windows]]) ; toute reconstruction de son image intègre les mises à jour cumulatives du moment (`windows/compile_micro_engine.ps1 -UpdatePath`, qui avertit sans elles). BYOL inchangé : l'ISO Rago ne contient pas Windows, l'image est construite chez le joueur depuis son ISO. Où, quand et par qui la reconstruction se fait : [[Questions ouvertes]].
+
+**Dépend de / relié à :** [[M12 Installateur]], [[Architecture]], [[M4 Updates A-B]], [[M5 Micro-Windows]]
 
 **Critère de test.** ISO boote, hardware_check OK, installateur se lance.
 

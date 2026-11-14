@@ -198,6 +198,22 @@ class SecurityFloor(unittest.TestCase):
             self.assertEqual(self._get(path, name), int(value), (path, name))
 
 
+class WindowsUpdate(unittest.TestCase):
+    """Décision du 14/11 : pas de mise à jour en ligne au runtime, UsoSvc et le réparateur gardés."""
+
+    def test_online_update_cut_orchestrator_kept(self):
+        disabled = [s["name"] for s in plan["services"]["disable"]]
+        self.assertIn("wuauserv", disabled)
+        for n in ("UsoSvc", "WaaSMedicSvc"):
+            self.assertTrue(like(n, plan["services"]["never_touch"]), n + " doit être dans never_touch")
+        for n in ("UsoSvc", "WaaSMedicSvc", "WerSvc"):
+            self.assertNotIn(n, disabled, n)
+        hits = [e for e in plan["registry"]["set"] if e["hive"] == "SOFTWARE"
+                and e["path"] == "Policies\\Microsoft\\Windows\\WindowsUpdate\\AU" and e["name"] == "NoAutoUpdate"]
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["value"], 1)
+
+
 class Selection(unittest.TestCase):
     def test_appx(self):
         removed, kept = select_appx(APPX_PRO_25H2)
