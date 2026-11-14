@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Rago OS — bibliothèque partagée (M7) : refuse l'hibernation de Linux tant
+# que RAGO-LIB (ou un autre volume NTFS) est montée.
+#
+# Pendant l'hibernation de Linux, le micro-Windows peut démarrer (switch de
+# M6) et écrire sur RAGO-LIB ; au réveil, Linux aurait un cache périmé du
+# volume et l'abîmerait. NTFS n'a aucun verrou entre deux systèmes. Ce garde
+# ne démonte rien lui-même et ne touche pas RAGO-COMM (son unité de montage
+# est en conflit avec sleep.target) : il fait échouer l'hibernation, avec la
+# raison dans le journal (journalctl -u rago-library-sleep-guard). Démonter
+# d'abord : rago-library umount (M6 le fera avant la bascule).
+#
+# La veille simple (suspend, en mémoire) n'est pas concernée : Windows ne peut
+# pas démarrer pendant qu'elle dure.
+
+[Unit]
+Description=Rago OS : pas d'hibernation avec RAGO-LIB (NTFS) montée
+Documentation=file:///usr/share/doc/rago/library/README.md
+DefaultDependencies=no
+Before=sleep.target systemd-hibernate.service systemd-hybrid-sleep.service systemd-suspend-then-hibernate.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/rago/rago-library.sh __sleep-guard
+TimeoutSec=20
+
+[Install]
+RequiredBy=systemd-hibernate.service systemd-hybrid-sleep.service systemd-suspend-then-hibernate.service

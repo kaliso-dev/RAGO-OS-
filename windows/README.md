@@ -189,8 +189,11 @@ sécurité de ce démarrage, l'affiche (profil demandé, VBS, HVCI, Secure Boot,
 TPM, conditions de Vanguard On-Demand ; le verdict officiel est dans VGTray
 de Riot), puis propose : `[1]` console, `[2]` console administrateur, `[3]`
 navigateur (Edge s'il est là), `[4]` lancer un programme (launcher,
-installateur), `[5]` rapport M5, `[S]` état de sécurité, `[L]` retour à Linux
-(redémarrage), `[E]` éteindre. Gestionnaire des tâches : Ctrl+Maj+Échap.
+installateur), `[5]` rapport M5, `[B]` bibliothèque (M7 : état, relancer
+la fenêtre, abandonner une requête), `[S]` état de sécurité, `[L]` retour à
+Linux (redémarrage), `[E]` éteindre. La fenêtre « Rago - bibliothèque »
+(agent de M7) s'ouvre aussi seule après l'état de sécurité : voir
+`windows/rago-agent/README.md`. Gestionnaire des tâches : Ctrl+Maj+Échap.
 Si le shell est fermé : Ctrl+Alt+Suppr > Gestionnaire des tâches >
 Exécuter une nouvelle tâche > `powershell -File C:\Rago\bin\rago-shell.ps1`.
 Le lancement direct du jeu viendra avec M6.
@@ -200,10 +203,13 @@ Le lancement direct du jeu viendra avec M6.
 - `C:\Rago\` (SYSTEM et Administrateurs seuls en écriture) : `bin\`
   (scripts), `setup\` (premier démarrage), `tasks\rago-boot.xml`, `redist\`,
   `micro-engine.json` (réglages de la construction), `comm\` (point de
-  montage de RAGO-COMM si Windows ne lui donne pas de lettre).
+  montage de RAGO-COMM si Windows ne lui donne pas de lettre), `agent\`
+  (agent de la bibliothèque partagée, M7, `-AgentPath`).
+- `L:\` : RAGO-LIB, la bibliothèque de jeux (M7), en ligne le temps d'une
+  session, hors ligne le reste du temps.
 - `C:\ProgramData\Rago\` : `logs\`, `reports\m5-engine-<date>.json`,
   `security-state.json`, `security-status.json`, `firstboot-<phase>.json`,
-  `windows-update-guard.json`.
+  `windows-update-guard.json`, `library-boot.json` (M7).
 - Journal du shell : `%LOCALAPPDATA%\Rago\logs\shell.log`.
 
 ## Critère de test de M5 (à faire sur le PC de jeu)

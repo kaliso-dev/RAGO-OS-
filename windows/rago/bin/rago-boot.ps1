@@ -17,8 +17,14 @@
          (effet immédiat) et c'est noté
          (C:\ProgramData\Rago\windows-update-guard.json, rapport M5) ;
          étapes 1, 2 et 2 bis aussi en -SettingsOnly (installation) ;
+      2 ter. bibliothèque partagée (M7) : pose le script d'arrêt de l'agent
+         (C:\Rago\agent\rago-agent.ps1 -RegisterShutdown), aussi en
+         -SettingsOnly pour qu'il soit actif dès la première session ;
       3. applique le profil de sécurité demandé par Linux
          (rago-security.ps1 -Apply ; peut redémarrer une fois sur Windows) ;
+      3 bis. si Windows ne redémarre pas : bibliothèque partagée (M7,
+         rago-agent.ps1 -Boot) : « running » dans RAGO-COMM, RAGO-LIB en ligne
+         sur L:, finalisation des jeux ;
       4. si Windows ne redémarre pas : rapport de mesure M5 (rago-report.ps1),
          une minute après l'ouverture de la session du joueur ;
       5. définitions de Defender : Windows Update est coupé dans le
@@ -131,6 +137,14 @@ function Set-RagoNoOnlineUpdate {
 try { Set-RagoAutoLogon } catch { Write-RagoLog ('ouverture automatique : ' + $_.Exception.Message) 'ERROR' }
 try { Set-RagoShell } catch { Write-RagoLog ('shell : ' + $_.Exception.Message) 'ERROR' }
 try { Set-RagoNoOnlineUpdate } catch { Write-RagoLog ('Windows Update : ' + $_.Exception.Message) 'ERROR' }
+
+# Bibliothèque partagée (M7) : C:\Rago\agent\ (absent d'une image construite sans lui).
+$agent = Join-Path (Get-RagoRootDir) 'agent\rago-agent.ps1'
+$hasAgent = Test-Path -LiteralPath $agent
+if ($hasAgent) {
+    try { & $agent -RegisterShutdown | Out-Null } catch { Write-RagoLog ('script d''arrêt de la bibliothèque : ' + $_.Exception.Message) 'ERROR' }
+    Set-RagoLogName 'boot'
+}
 if ($SettingsOnly) { return }
 
 # Fin d'installation pas faite (SetupComplete.cmd non lancé par Windows, ou compte
@@ -152,6 +166,10 @@ try { & $sec -Apply } catch { Write-RagoLog ('rago-security.ps1 : ' + $_.Excepti
 $st = $null
 try { $st = Read-RagoJson (Join-Path (Get-RagoDataDir) 'security-status.json') } catch { $st = $null }
 if ($null -ne $st -and $st.boot_id -eq (Get-RagoBootId) -and $st.reboot -eq 'started') { exit 0 }
+if ($hasAgent) {
+    try { & $agent -Boot | Out-Null } catch { Write-RagoLog ('rago-agent.ps1 -Boot : ' + $_.Exception.Message) 'ERROR' }
+    Set-RagoLogName 'boot'
+}
 try { & (Join-Path $PSScriptRoot 'rago-report.ps1') -SettleSeconds 60 -WaitForShell | Out-Null }
 catch { Write-RagoLog ('rago-report.ps1 : ' + $_.Exception.Message) 'ERROR' }
 
