@@ -226,6 +226,8 @@ public static class RagoVolumeNative {
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool DeviceIoControl(SafeFileHandle h, uint code, IntPtr inBuf, uint inSize, IntPtr outBuf, uint outSize, out uint returned, IntPtr overlapped);
     const uint IOCTL_VOLUME_IS_OFFLINE = 0x00560010;
+    // FSCTL_IS_VOLUME_DIRTY = CTL_CODE(FILE_DEVICE_FILE_SYSTEM 9, 30, METHOD_BUFFERED, FILE_ANY_ACCESS)
+    const uint FSCTL_IS_VOLUME_DIRTY = 0x00090078;
     public static bool IsOffline(string device) {
         using (SafeFileHandle h = CreateFileW(device, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
             if (h.IsInvalid) { return false; }
@@ -233,12 +235,26 @@ public static class RagoVolumeNative {
             return DeviceIoControl(h, IOCTL_VOLUME_IS_OFFLINE, IntPtr.Zero, 0, IntPtr.Zero, 0, out n, IntPtr.Zero);
         }
     }
+    // 1 : volume marqué « sale » (VOLUME_IS_DIRTY) ; 0 : propre ; -1 : illisible.
+    public static int IsDirty(string device) {
+        using (SafeFileHandle h = CreateFileW(device, 0x80000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
+            if (h.IsInvalid) { return -1; }
+            IntPtr buf = Marshal.AllocHGlobal(4);
+            try {
+                Marshal.WriteInt32(buf, 0);
+                uint n;
+                if (!DeviceIoControl(h, FSCTL_IS_VOLUME_DIRTY, IntPtr.Zero, 0, buf, 4, out n, IntPtr.Zero) || n < 4) { return -1; }
+                return (Marshal.ReadInt32(buf) & 1) != 0 ? 1 : 0;
+            } finally { Marshal.FreeHGlobal(buf); }
+        }
+    }
 }
 '@
 
 function Test-RagoVolumeOffline {
     param([string]$VolumePath)
-    if (-not ($VolumePath -cmatch '^\\\?\\(Volume\{[0-9a-fA-F-]{36}\})\\$')) { return $false }
+    # Même motif que Get-RagoVolumeGuidPath : deux barres obliques inverses au début.
+    if (-not ($VolumePath -cmatch '^\\\\\?\\(Volume\{[0-9a-fA-F-]{36}\})\\$')) { return $false }
     $dev = '\\.\' + $Matches[1]
     try {
         if ($null -eq ('RagoVolumeNative' -as [type])) { Add-Type -TypeDefinition $script:VolumeNativeCs }
@@ -249,6 +265,46 @@ function Test-RagoVolumeOffline {
     }
 }
 
+# Volume marqué « sale » ? $true / $false, ou $null si Windows ne répond pas (doute).
+function Test-RagoVolumeDirty {
+    param([Parameter(Mandatory = $true)][string]$Letter)
+    if (-not ($Letter -cmatch '^[D-Z]$')) { return $null }
+    try {
+        if ($null -eq ('RagoVolumeNative' -as [type])) { Add-Type -TypeDefinition $script:VolumeNativeCs }
+        $d = [RagoVolumeNative]::IsDirty('\\.\' + $Letter + ':')
+    } catch {
+        Write-RagoLog ('état « sale » de {0}: illisible : {1}' -f $Letter, $_.Exception.Message) 'WARN'
+        return $null
+    }
+    if ($d -eq 1) { return $true }
+    if ($d -eq 0) { return $false }
+    return $null
+}
+
+# RAGO-LIB est hors ligne au démarrage : autochk ne la vérifie donc jamais.
+# Si elle est marquée « sale » (Linux coupé pendant un montage en écriture,
+# ou Windows a demandé une vérification), on la répare AVANT que quiconque y
+# écrive (rien n'utilise encore la lettre). Réparation hors ligne de Windows
+# (Repair-Volume -OfflineScanAndFix, l'équivalent de chkdsk /f). Réussie
+# seulement si le volume n'est plus marqué « sale » ensuite.
+function Repair-RagoLibIfDirty {
+    param([Parameter(Mandatory = $true)][string]$Letter)
+    $res = [ordered]@{ dirty = (Test-RagoVolumeDirty -Letter $Letter); repair = $null; ok = $false }
+    if ($res.dirty -eq $false) { $res.ok = $true; return $res }
+    Write-RagoLog ('RAGO-LIB ({0}:) sale ou état illisible : réparation hors ligne' -f $Letter) 'WARN'
+    try {
+        $r = Repair-Volume -DriveLetter $Letter -OfflineScanAndFix -ErrorAction Stop
+        $res.repair = [string]$r
+    } catch {
+        $res.repair = ('échec : ' + $_.Exception.Message)
+        return $res
+    }
+    $after = Test-RagoVolumeDirty -Letter $Letter
+    $res.ok = ($after -eq $false)
+    if (-not $res.ok) { $res.repair += ' ; toujours marquée sale (ou état illisible) après la réparation' }
+    return $res
+}
+
 function Get-RagoLetters {
     param([Parameter(Mandatory = $true)]$Partition)
     $l = @()
@@ -256,11 +312,20 @@ function Get-RagoLetters {
     return $l
 }
 
+# Programme natif : sa sortie d'erreur ne doit pas devenir une exception
+# (Windows PowerShell 5.1 + 2>&1 + « Stop ») ; seul le code de sortie compte.
+function Invoke-RagoNative {
+    param([Parameter(Mandatory = $true)][string]$FilePath, [string[]]$Arguments = @())
+    $ErrorActionPreference = 'Continue'
+    $out = & $FilePath @Arguments 2>&1
+    $code = $LASTEXITCODE
+    $text = (@($out | ForEach-Object { [string]$_ }) -join [Environment]::NewLine).Trim()
+    return [pscustomobject]@{ code = $code; output = $text }
+}
+
 function Invoke-RagoMountvol {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    $exe = Join-Path $env:SystemRoot 'System32\mountvol.exe'
-    $out = & $exe @Arguments 2>&1
-    return [pscustomobject]@{ code = $LASTEXITCODE; output = (($out | Out-String).Trim()) }
+    return (Invoke-RagoNative -FilePath (Join-Path $env:SystemRoot 'System32\mountvol.exe') -Arguments $Arguments)
 }
 
 # Met RAGO-LIB en ligne sur sa lettre. Renvoie l'état pour windows-state.json.
@@ -273,7 +338,7 @@ function Mount-RagoLib {
     if ($have -notcontains $Letter) {
         $taken = Get-Volume -DriveLetter $Letter -ErrorAction SilentlyContinue
         if ($null -ne $taken -or (Test-Path -LiteralPath ($Letter + ':\'))) {
-            $lib.error = ('lettre {0}: prise par un autre volume : RAGO-LIB pas mise en ligne (retirer ce volume, puis redémarrer)' -f $Letter)
+            $lib.error = ('lettre {0}: prise par un autre volume : RAGO-LIB pas mise sur {0}: ni utilisée (retirer ce volume, puis redémarrer)' -f $Letter)
             # Hors ligne seulement si Windows ne l'a pas montée d'office sur une autre lettre.
             $lib.offline = ($have.Count -eq 0 -and (Test-RagoVolumeOffline $vol))
             return $lib
@@ -281,11 +346,18 @@ function Mount-RagoLib {
         # Un point de montage remet en ligne un volume sorti par mountvol /P (doc Microsoft de mountvol).
         $r = Invoke-RagoMountvol @(($Letter + ':\'), $vol)
         if ($r.code -ne 0) { $lib.error = ('mountvol {0}:\ : code {1} {2}' -f $Letter, $r.code, $r.output); return $lib }
-        foreach ($x in $have) { Write-RagoLog ('RAGO-LIB avait aussi la lettre {0}: (gardée)' -f $x) 'WARN' }
     }
     $root = $Letter + ':\'
     for ($i = 0; $i -lt 20 -and -not (Test-Path -LiteralPath $root); $i++) { Start-Sleep -Milliseconds 500 }
     if (-not (Test-Path -LiteralPath $root)) { $lib.error = ('{0} illisible après la mise en ligne' -f $root); return $lib }
+    # Une seule lettre : un client qui retiendrait une autre lettre (montage
+    # automatique de Windows) perdrait son chemin à l'arrêt.
+    foreach ($x in $have) {
+        if ($x -eq $Letter) { continue }
+        $r = Invoke-RagoMountvol @(($x + ':\'), '/D')
+        if ($r.code -ne 0) { Write-RagoLog ('RAGO-LIB : lettre {0}: pas retirée : {1}' -f $x, $r.output) 'WARN' }
+        else { Write-RagoLog ('RAGO-LIB : lettre {0}: retirée (seule {1}: reste)' -f $x, $Letter) }
+    }
     $v = Get-Volume -DriveLetter $Letter -ErrorAction SilentlyContinue
     if ($null -ne $v -and [string]$v.FileSystem -ne 'NTFS') { $lib.error = ('{0} est en {1}, NTFS attendu' -f $root, $v.FileSystem) }
     $lib.letter = $Letter
@@ -348,9 +420,8 @@ function Grant-RagoLibUsers {
         $modify = [int][System.Security.AccessControl.FileSystemRights]::Modify
         if ($want -contains $sid -and $ace.AccessControlType -eq 'Allow' -and (($rights -band $modify) -eq $modify)) { return 'déjà' }
     }
-    $exe = Join-Path $env:SystemRoot 'System32\icacls.exe'
-    $out = & $exe $Root '/grant' '*S-1-5-32-545:(OI)(CI)M' '/C' '/Q' 2>&1
-    if ($LASTEXITCODE -ne 0) { throw ('icacls {0} : {1}' -f $Root, ($out | Out-String).Trim()) }
+    $r = Invoke-RagoNative -FilePath (Join-Path $env:SystemRoot 'System32\icacls.exe') -Arguments @($Root, '/grant', '*S-1-5-32-545:(OI)(CI)M', '/C', '/Q')
+    if ($r.code -ne 0) { throw ('icacls {0} : {1}' -f $Root, $r.output) }
     return 'Utilisateurs : modification'
 }
 
@@ -475,6 +546,6 @@ function Set-RagoShutdownScript {
 
 Export-ModuleMember -Function Get-RagoAgentDir, Get-RagoAgentConfig, Get-RagoLaunchers, Test-RagoProp, Get-RagoPropValue, Get-RagoLibraryCommDir,
     Sync-RagoVolume, Sync-RagoComm, Write-RagoWindowsState, Read-RagoPartitionNote, Write-RagoResult, Get-RagoRequests,
-    Get-RagoOpenResults, Find-RagoLibPartition, Get-RagoVolumeGuidPath, Test-RagoVolumeOffline, Get-RagoLetters, Invoke-RagoMountvol, Mount-RagoLib,
+    Get-RagoOpenResults, Find-RagoLibPartition, Get-RagoVolumeGuidPath, Test-RagoVolumeOffline, Test-RagoVolumeDirty, Repair-RagoLibIfDirty, Get-RagoLetters, Invoke-RagoNative, Invoke-RagoMountvol, Mount-RagoLib,
     Dismount-RagoLib, Grant-RagoLibUsers, Initialize-RagoLibTree, Read-RagoGameRecord, Write-RagoGameRecord,
     ConvertTo-RagoLibRelative, Get-RagoWindowsInstallId, Set-RagoShutdownScript

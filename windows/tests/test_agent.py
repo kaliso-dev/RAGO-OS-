@@ -233,13 +233,57 @@ class SafetyOrder(unittest.TestCase):
         self.assertNotIn("-State off", boot)
 
     def test_off_after_offline(self):
-        shut = code_only(function_body(AGENT_PS, "Invoke-RagoAgentShutdown"))
+        shut = code_only(function_body(AGENT_PS, "Invoke-RagoAgentShutdownLocked"))
         self.assertLess(shut.index("Dismount-RagoLib"), shut.index("-State off"))
+        # Sans le verrou, « hors ligne » n'est jamais affirmé.
+        self.assertLess(shut.index("if (-not $Locked)"), shut.index("-State off"))
+        self.assertIn("$lib.offline = $false", shut[shut.index("if (-not $Locked)"):])
         # « off » écrit seulement par l'arrêt.
         for n, t in ALL_PS.items():
             if n == "rago-agent.ps1":
-                t = t.replace(function_body(AGENT_PS, "Invoke-RagoAgentShutdown"), "")
+                t = t.replace(function_body(AGENT_PS, "Invoke-RagoAgentShutdownLocked"), "")
             self.assertFalse("-State off" in code_only(t), n)
+
+    def test_boot_and_shutdown_never_cross(self):
+        # Relecture : le joueur peut éteindre pendant que \Rago\Boot met RAGO-LIB en ligne.
+        boot = code_only(function_body(AGENT_PS, "Invoke-RagoAgentBoot"))
+        lock = boot.index("Enter-RagoLibraryLock")
+        self.assertLess(lock, boot.index("Test-RagoShutdownStarted"))
+        self.assertLess(boot.index("Test-RagoShutdownStarted"), boot.index("Write-RagoWindowsState"))
+        self.assertLess(boot.index("Write-RagoWindowsState"), boot.index("Mount-RagoLib"))
+        self.assertIn("Exit-RagoLibraryLock $lock", boot[boot.index("} finally {"):])
+        shut = code_only(function_body(AGENT_PS, "Invoke-RagoAgentShutdown"))
+        self.assertLess(shut.index("$shutdownMarkPath"), shut.index("Enter-RagoLibraryLock"))
+        self.assertIn("Invoke-RagoAgentShutdownLocked -Locked ($null -ne $lock)", shut)
+        self.assertIn("Exit-RagoLibraryLock $lock", shut)
+        self.assertIn("'Global\\RagoLibraryVolume'", AGENT_PS)
+
+    def test_dirty_volume_repaired_before_any_write(self):
+        # Relecture : hors ligne au démarrage, RAGO-LIB n'est jamais vue par autochk.
+        boot = code_only(function_body(AGENT_PS, "Invoke-RagoAgentBoot"))
+        rep = boot.index("Repair-RagoLibIfDirty")
+        self.assertLess(boot.index("Mount-RagoLib"), rep)
+        for w in ("Grant-RagoLibUsers", "$info.lib_root = $root"):
+            self.assertLess(rep, boot.index(w), w)
+        fail = boot[rep:boot.index("$info.lib_root = $root")]
+        self.assertIn("$lib.online = $false", fail)
+        # Pas réparée : lib_root reste vide, donc remise hors ligne dans « finally ».
+        fin = boot[boot.index("} finally {"):]
+        self.assertIn("if ($null -ne $lock -and -not $info.lib_root)", fin)
+        self.assertIn("Close-RagoLibIfOnline", fin)
+        self.assertLess(fin.index("Close-RagoLibIfOnline"), fin.index("Exit-RagoLibraryLock"))
+        self.assertIn("Dismount-RagoLib", function_body(AGENT_PS, "Close-RagoLibIfOnline"))
+        body = code_only(function_body(MOD, "Repair-RagoLibIfDirty"))
+        self.assertLess(body.index("if ($res.dirty -eq $false)"), body.index("Repair-Volume"))
+        self.assertIn("-OfflineScanAndFix", body)
+        self.assertIn("$res.ok = ($after -eq $false)", body)
+        self.assertIn("0x00090078", MOD)
+        # La réparation n'est faite que là.
+        for n, t in ALL_PS.items():
+            c = code_only(t)
+            if n == "RagoAgent.psm1":
+                c = c.replace(code_only(function_body(MOD, "Repair-RagoLibIfDirty")), "")
+            self.assertNotIn("Repair-Volume", c, n)
 
     def test_state_flushed_before_touching_lib(self):
         body = function_body(MOD, "Write-RagoWindowsState")
@@ -276,7 +320,7 @@ class SafetyOrder(unittest.TestCase):
         for n, t in ALL_PS.items():
             c = code_only(t)
             if n == "RagoLaunchers.psm1":
-                c = c.replace(body, "")
+                c = c.replace(code_only(body), "")
             self.assertNotIn("Invoke-WebRequest", c, n)
             self.assertNotIn("WebClient", c, n)
 
@@ -289,6 +333,113 @@ class SafetyOrder(unittest.TestCase):
         self.assertIn("-Encoding Unicode", body)
         self.assertIn("-Encoding Ascii", body)
         self.assertIn("Group Policy\\State\\Machine\\Scripts\\Shutdown", body)
+
+
+class Review(unittest.TestCase):
+    """Défauts trouvés par la relecture indépendante (14/11), pour qu'ils ne reviennent pas."""
+
+    def test_volume_regexes_accept_real_path(self):
+        # Le motif de Test-RagoVolumeOffline n'acceptait qu'UNE barre au début :
+        # Windows n'aurait jamais confirmé RAGO-LIB hors ligne.
+        guid_rx = re.search(r"\$a -match '([^']+)'\) \{ return \[string\]\$a", MOD).group(1)
+        off_rx = re.search(r"\$VolumePath -cmatch '([^']+)'", MOD).group(1)
+        sample = "\\\\?\\Volume{0a1b2c3d-1111-2222-3333-444455556666}\\"
+        self.assertTrue(re.search(guid_rx, sample))
+        m = re.search(off_rx, sample)
+        self.assertIsNotNone(m, "Test-RagoVolumeOffline refuse \\\\?\\Volume{...}\\")
+        self.assertEqual(m.group(1), "Volume{0a1b2c3d-1111-2222-3333-444455556666}")
+        for bad in ("\\?\\Volume{0a1b2c3d-1111-2222-3333-444455556666}\\", "C:\\", "\\\\.\\Volume{x}\\"):
+            self.assertIsNone(re.search(off_rx, bad), bad)
+
+    def test_shutdown_found_false_only_when_sure(self):
+        body = code_only(function_body(AGENT_PS, "Invoke-RagoAgentShutdownLocked"))
+        self.assertIn("[ordered]@{ found = $null;", body)
+        self.assertNotIn("@{ found = $false", body)
+        self.assertEqual(body.count("$lib.found = $false"), 1)
+        i = body.index("$lib.found = $false")
+        self.assertIn("Read-RagoBootInfo", body[:i])
+        self.assertIn("$boot.lib_root", body[:i])
+        self.assertLess(body.index("$lib.found = $true"), body.index("Dismount-RagoLib"))
+
+    def test_resumed_requests_reopen_client_once(self):
+        body = code_only(function_body(AGENT_PS, "Step-RagoRequest"))
+        self.assertNotIn("$null -eq $Prev", body)
+        self.assertIn("$kick = Test-RagoKick $Req", body)
+        # Chaque « … installe le jeu » (suivi d'une installation) rouvre le client une fois.
+        for msg in ("'Steam installe le jeu sur RAGO-LIB'", "'le lanceur Epic installe le jeu sur RAGO-LIB'",
+                    "'le Riot Client installe le jeu sur RAGO-LIB'"):
+            i = body.index(msg)
+            before = body[max(0, body.rfind("{", 0, body.rfind("if (", 0, i)) - 400):i]
+            self.assertIn("if ($kick", before, msg)
+            self.assertIn("Start-Process", before, msg)
+
+    def test_client_install_tried_once_per_session(self):
+        body = code_only(function_body(AGENT_PS, "Step-RagoRequest"))
+        for call, name in (("Install-RagoSteamClient", "steam"), ("Install-RagoEpicClient", "epic")):
+            for m in re.finditer(re.escape(call), body):
+                self.assertIn("Test-RagoClientTry '%s'" % name, body[max(0, m.start() - 400):m.start()], call)
+
+    def test_timeout_counts_session_time(self):
+        body = code_only(function_body(AGENT_PS, "Invoke-RagoAgentSession"))
+        self.assertNotIn("started_at", body)
+        self.assertIn("$script:SeenAt", body)
+        self.assertIn("dans une meme session", CONFIG["doc"])
+
+    def test_open_result_errors_end_in_failed(self):
+        body = code_only(function_body(AGENT_PS, "Invoke-RagoAgentSession"))
+        self.assertIn("$script:Strikes", body)
+        self.assertRegex(body, r"if \(\$n -ge 3\) \{ Write-RagoJob \$comm \$res 'failed'")
+
+    def test_riot_needs_all_main_files(self):
+        body = code_only(function_body(LAUNCH, "Get-RagoRiotProduct"))
+        self.assertLess(body.index("$exeOk = $true"), body.index("foreach ($rel in @($p.main_files))"))
+        self.assertIn("{ $exeOk = $false }", body)
+
+    def test_system_never_reads_library_data(self):
+        # Relecture : RAGO-LIB est modifiable par les Utilisateurs ; SYSTEM n'y lit
+        # ni n'y écrit rien d'autre que les droits de la racine (sinon un programme
+        # du joueur pourrait faire écrire SYSTEM n'importe où).
+        system = code_only(function_body(AGENT_PS, "Invoke-RagoAgentBoot")) + \
+            code_only(function_body(AGENT_PS, "Invoke-RagoAgentShutdownLocked"))
+        for bad in ("Invoke-RagoFinalize", "Initialize-RagoLibTree", "Read-RagoGameRecord", "Write-RagoGameRecord",
+                    "Restore-RagoClientFile", ".rago"):
+            self.assertNotIn(bad, system, bad)
+        sess = code_only(function_body(AGENT_PS, "Invoke-RagoAgentSession"))
+        self.assertLess(sess.index("Initialize-RagoLibTree"), sess.index("while ($true)"))
+        self.assertLess(sess.index("Invoke-RagoFinalize"), sess.index("while ($true)"))
+        fin = code_only(function_body(AGENT_PS, "Invoke-RagoFinalize"))
+        self.assertNotIn("Install-RagoVcFromRedist", fin)
+        self.assertIn("if (-not $vcOk)", fin)
+        self.assertLess(fin.index("if (-not $vcOk)"), fin.index("$rec.finalized ="))
+        self.assertIn("'^[A-Za-z0-9._-]{1,64}$'", fin)
+
+    def test_signer_is_exact_name(self):
+        # Relecture : plus de recherche de « Valve » n'importe où dans le DN.
+        body = code_only(function_body(LAUNCH, "Get-RagoOfficialInstaller"))
+        self.assertIn("X509NameType]::SimpleName", body)
+        self.assertIn("$cn -cmatch $SignerRx", body)
+        self.assertNotIn("$subject -match", body)
+        self.assertIn("-PassThru", body)
+        self.assertIn("ResponseUri", body)
+        good = {"steam": ["Valve Corp.", "Valve Corporation"], "epic": ["Epic Games Inc.", "Epic Games, Inc."],
+                "riot": ["Riot Games, Inc."]}
+        bad = ["Valvetronic Ltd", "Valve", "Epic Games Fan Club", "xRiot Games, Inc.", "Riot Games Fan Studio LLC",
+               "CN=Valve Corp., O=Valve Corp."]
+        for name, rx in ((k, LAUNCHERS[k]["signer_rx"]) for k in ("steam", "epic", "riot")):
+            self.assertTrue(rx.startswith("^") and rx.endswith("$"), name)
+            for g in good[name]:
+                self.assertTrue(re.search(rx, g), (name, g))
+            for b in bad:
+                self.assertIsNone(re.search(rx, b), (name, b))
+
+    def test_native_stderr_never_throws(self):
+        # Windows PowerShell 5.1 : « 2>&1 » + « Stop » fait d'une ligne d'erreur une exception.
+        for name, text in ALL_PS.items():
+            code = code_only(text)
+            for m in re.finditer(r"2>&1", code):
+                fn = code.rfind("function ", 0, m.start())
+                self.assertTrue(code.startswith("function Invoke-RagoNative", fn), f"{name} : 2>&1 hors de Invoke-RagoNative")
+        self.assertIn("$ErrorActionPreference = 'Continue'", function_body(MOD, "Invoke-RagoNative"))
 
 
 class Launchers(unittest.TestCase):

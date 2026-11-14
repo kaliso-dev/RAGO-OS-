@@ -13,7 +13,7 @@ Retour à [[Architecture]]. Le cœur du produit. Module : [[M6 Fast OS Switch]],
 
 **Avec [[M5 Micro-Windows]] (14/11)** : Windows n'écrit dans les variables de démarrage que pour un **changement de profil de sécurité** (un BootNext vers lui-même, à usage unique, pour redémarrer une fois avec le bon hyperviseur) ; un redémarrage ou un écran bleu de Windows retombe sur Linux. L'hibernation de Windows est **coupée par défaut** (décision du 14/11) : le micro-Windows ne s'hiberne jamais lui-même, l'hibernation du switch est celle de Linux ; reprendre Windows depuis l'hibernation est un arbitrage disque / vitesse à étudier en [[M8 Optimisation switch]]. Pas de mise à jour en ligne dans Windows (décision du 14/11) : pas d'écran « mise à jour en cours » pendant une bascule.
 
-**Avec [[M7 Bibliothèque partagée]] (14/11)** : la partition des jeux (RAGO-LIB, NTFS) n'est jamais ouverte par les deux OS à la fois : Linux la démonte avant de basculer (et refuse d'hiberner tant qu'elle est montée), Windows la met hors ligne à chaque arrêt et le note dans RAGO-COMM. Un arrêt brutal de Windows laisse Linux en lecture seule sur RAGO-LIB.
+**Avec [[M7 Bibliothèque partagée]] (14/11)** : la partition des jeux (RAGO-LIB, NTFS) n'est jamais ouverte par les deux OS à la fois : Linux la démonte avant de basculer (et refuse d'hiberner tant qu'elle est montée, ou encore ouverte ailleurs — par exemple pendant une mise à jour A/B), Windows la met hors ligne à chaque arrêt et le note dans RAGO-COMM. Un arrêt brutal de Windows laisse Linux en lecture seule sur RAGO-LIB.
 
 **Deux modes** : *Rapide* (session légère → pas d'hibernation, micro-session qui cold-boote ~2 s) et *Session préservée* (hibernation LZ4/zstd).
 

@@ -31,25 +31,40 @@ function Get-RagoRegValue {
     try { return [string](Get-ItemProperty -LiteralPath $Key -Name $Name -ErrorAction Stop).$Name } catch { return $null }
 }
 
-# Télécharge l'installateur officiel et vérifie sa signature Authenticode.
+# Télécharge l'installateur officiel et vérifie sa signature Authenticode :
+# valide, et nom du signataire (CN) égal à celui de l'éditeur ($SignerRx est
+# ancré : ^...$, comparé en respectant la casse ; pas une recherche dans le DN).
 function Get-RagoOfficialInstaller {
     param([Parameter(Mandatory = $true)][string]$Url, [Parameter(Mandatory = $true)][string]$SignerRx, [Parameter(Mandatory = $true)][string]$FileName)
     if (-not ($Url -match '^https://')) { throw ('adresse refusée (https seulement) : ' + $Url) }
+    if (-not ($SignerRx.StartsWith('^') -and $SignerRx.EndsWith('$'))) { throw ('motif de signataire non ancré : ' + $SignerRx) }
     $dir = Join-Path $env:TEMP 'rago-agent'
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     $dst = Join-Path $dir $FileName
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $old = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
-    try { Invoke-WebRequest -Uri $Url -OutFile $dst -UseBasicParsing -TimeoutSec 600 } finally { $ProgressPreference = $old }
+    $resp = $null
+    try { $resp = Invoke-WebRequest -Uri $Url -OutFile $dst -UseBasicParsing -TimeoutSec 600 -PassThru } finally { $ProgressPreference = $old }
+    # Après les redirections : toujours en https.
+    $final = $null
+    try { $final = [string]$resp.BaseResponse.ResponseUri } catch { $final = $null }
+    if ($final -and -not ($final -match '^https://')) {
+        Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+        throw ('{0} : redirigé hors https ({1})' -f $FileName, $final)
+    }
     $sig = Get-AuthenticodeSignature -LiteralPath $dst
+    $cn = ''
     $subject = ''
-    if ($null -ne $sig.SignerCertificate) { $subject = [string]$sig.SignerCertificate.Subject }
-    if ($sig.Status -ne 'Valid' -or -not ($subject -match $SignerRx)) {
+    if ($null -ne $sig.SignerCertificate) {
+        $subject = [string]$sig.SignerCertificate.Subject
+        $cn = [string]$sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+    }
+    if ($sig.Status -ne 'Valid' -or -not ($cn -cmatch $SignerRx)) {
         Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
         throw ('signature de {0} refusée (état {1}, signataire « {2} », attendu {3})' -f $FileName, $sig.Status, $subject, $SignerRx)
     }
-    Write-RagoLog ('{0} téléchargé depuis {1}, signé par {2}' -f $FileName, $Url, $subject)
+    Write-RagoLog ('{0} téléchargé depuis {1} ({2}), signé par {3}' -f $FileName, $Url, $final, $subject)
     return $dst
 }
 
@@ -235,11 +250,14 @@ function Get-RagoRiotProduct {
         if ($line -match '^\s*product_install_full_path:\s*"?([^"]*)"?\s*$') { $path = $Matches[1].Replace('/', '\') }
     }
     if (-not $path) { return [pscustomobject]@{ metadata = $meta; install_dir = $null; done = $false } }
+    # Fini seulement si TOUS les fichiers principaux sont là (le correcteur de
+    # Riot peut écrire le petit lanceur avant le jeu).
     $exeOk = $false
     $p = $null
     if ($L.riot.products.PSObject.Properties.Name -contains $Product) { $p = $L.riot.products.$Product }
-    if ($null -ne $p) {
-        foreach ($rel in @($p.main_files)) { if (Test-Path -LiteralPath (Join-Path $path $rel)) { $exeOk = $true } }
+    if ($null -ne $p -and @($p.main_files).Count -gt 0) {
+        $exeOk = $true
+        foreach ($rel in @($p.main_files)) { if (-not (Test-Path -LiteralPath (Join-Path $path $rel))) { $exeOk = $false } }
     }
     return [pscustomobject]@{ metadata = $meta; install_dir = $path; done = $exeOk }
 }

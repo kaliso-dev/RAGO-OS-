@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "kind": "rago-agent-launchers",
-  "doc": "Clients officiels utilises par l'agent M7 (micro-Windows). Les installateurs sont telecharges sur la machine du joueur depuis l'adresse de l'editeur et leur signature Authenticode est verifiee (signer_rx) avant de les lancer : rien n'est redistribue par Rago. Chaque valeur a sa source ; celles qui ne sont pas documentees par l'editeur sont a verifier sur la machine (note M7 du vault).",
+  "doc": "Clients officiels utilises par l'agent M7 (micro-Windows). Les installateurs sont telecharges sur la machine du joueur depuis l'adresse de l'editeur et leur signature Authenticode est verifiee avant de les lancer : valide, et nom du signataire (CN du certificat) egal a celui de l'editeur (signer_rx, motif ancre ^...$ ; noms exacts a verifier sur la machine) : rien n'est redistribue par Rago. Chaque valeur a sa source ; celles qui ne sont pas documentees par l'editeur sont a verifier sur la machine (note M7 du vault).",
   "steam": {
     "installer_url": "https://cdn.fastly.steamstatic.com/client/installer/SteamSetup.exe",
     "installer_source": "https://store.steampowered.com/about/ (lien de la page officielle de Valve)",
-    "signer_rx": "Valve",
+    "signer_rx": "^Valve( Corp\\.?| Corporation)$",
     "library_dir": "Games\\Steam",
     "install_uri": "steam://install/{id}",
     "launch_args": [
@@ -18,7 +18,7 @@
   "epic": {
     "installer_url": "https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/installer/download/EpicGamesLauncherInstaller.msi",
     "installer_source": "adresse stable utilisee par Lutris (hote d'Epic) ; methode msiexec /i : aide officielle d'Epic",
-    "signer_rx": "Epic Games",
+    "signer_rx": "^Epic Games,? Inc\\.?$",
     "library_dir": "Games\\Epic",
     "manifests_dir": "%ProgramData%\\Epic\\EpicGamesLauncher\\Data\\Manifests",
     "install_uri_full": "com.epicgames.launcher://apps/{ns}%3A{cat}%3A{app}?action=install",
@@ -31,7 +31,7 @@
     "client_default": "%SystemDrive%\\Riot Games\\Riot Client\\RiotClientServices.exe",
     "client_installs_json": "%ProgramData%\\Riot Games\\RiotClientInstalls.json",
     "metadata_dir": "%ProgramData%\\Riot Games\\Metadata",
-    "signer_rx": "Riot Games",
+    "signer_rx": "^Riot Games,? Inc\\.?$",
     "library_dir": "Games\\Riot",
     "launch_args": [
       "--launch-product={id}",

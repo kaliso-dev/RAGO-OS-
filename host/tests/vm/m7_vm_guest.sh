@@ -23,6 +23,8 @@
 #   - requête relue sur la FAT32 sans Linux (mtools, comme Windows) ;
 #   - garde d'hibernation sous systemd : systemd-hibernate.service refusé
 #     tant que RAGO-LIB est montée, sans toucher RAGO-COMM ;
+#   - volume démonté ici mais encore ouvert dans un autre espace de noms (cas
+#     d'une mise à jour M4 en cours) : umount, le garde et mount le voient ;
 #   - désinstallation.
 set -u
 
@@ -61,6 +63,8 @@ fat_put() { # fat_put <fichier local> <chemin dans RAGO-COMM>
 	mcopy -o -i "$(readlink -f "$COMM")" "$1" "::$2"
 }
 fat_cat() { mtype -i "$(readlink -f "$COMM")" "::$1" 2>/dev/null; }
+# shellcheck disable=SC2329 # appelée par check_true
+fat_absent() { ! mtype -i "$(readlink -f "$COMM")" "::$1" > /dev/null 2>&1; }
 json_get() { python3 -c 'import json,sys; d=json.load(sys.stdin)
 for k in sys.argv[1].split("/"): d=d[k]
 print(d)' "$1" 2>/dev/null; }
@@ -176,6 +180,26 @@ check "umount refusé, RAGO-LIB occupée : code 1" "1" "$?"
 check_true "umount : programme nommé" grep -q "sleep" "$OUT/u2.log"
 kill "$busy" 2>/dev/null
 wait "$busy" 2>/dev/null
+# Cas de M4 (« apply » dans un espace de noms privé, copie de tous les
+# montages) : le démontage ici réussit, mais le volume reste ouvert.
+unshare --mount --propagation private sleep 120 &
+ns=$!
+for _ in $(seq 50); do
+	[ "$(readlink "/proc/$ns/ns/mnt" 2>/dev/null)" != "$(readlink /proc/self/ns/mnt)" ] && break
+	sleep 0.1
+done
+rago-library umount > "$OUT/u-ns.log" 2>&1
+check "umount, volume encore ouvert dans un autre espace de noms : code 1" "1" "$?"
+check_true "umount : « encore tenue par le noyau »" grep -q "encore tenue par le noyau" "$OUT/u-ns.log"
+check_true "RAGO-LIB plus dans le tableau des montages d'ici" not_mounted
+systemctl reset-failed rago-library-sleep-guard.service 2>/dev/null
+systemctl start systemd-hibernate.service > "$OUT/hib-ns.log" 2>&1
+check_true "hibernation refusée : volume tenu dans un autre espace de noms" test "$?" -ne 0
+check_true "journal : « tenu par le noyau »" sh -c 'journalctl -u rago-library-sleep-guard.service -b --no-pager | grep -q "tenu par le noyau"'
+rago-library mount --ro > "$OUT/m-ns.log" 2>&1
+check "mount refusé, ancien montage encore vivant : code 1" "1" "$?"
+kill "$ns" 2>/dev/null
+wait "$ns" 2>/dev/null
 rago-library umount > "$OUT/u3.log" 2>&1
 check "umount" "0" "$?"
 systemctl reset-failed rago-library-sleep-guard.service 2>/dev/null
@@ -193,8 +217,12 @@ check_true "list (démontée) : jeu lu" grep -q "steam-730" "$OUT/list2.log"
 check_true "list : RAGO-LIB redémontée après lecture" not_mounted
 
 # --- requêtes : relues sur la FAT32 sans Linux, comme Windows -------------------------------------
+# Relecture : la requête note aussi la partition pour Windows (sans montage).
+mdel -i "$(readlink -f "$COMM")" ::/library/partition.json 2>/dev/null
+check_true "partition.json effacé (comme sur une installation neuve)" fat_absent /library/partition.json
 rago-library install steam 730 --name "Counter-Strike 2" > "$OUT/req.log" 2>&1
 check "install steam 730 : code 0" "0" "$?"
+check "install : partition.json réécrit avec le PARTUUID réel" "$PARTUUID" "$(fat_cat /library/partition.json | json_get partuuid)"
 fat_cat /library/requests/install-steam-730.json > "$OUT/req.json"
 check "requête lue sur la FAT32 : id" "install-steam-730" "$(json_get id < "$OUT/req.json")"
 check "requête : clé de jeu" "steam-730" "$(json_get game_key < "$OUT/req.json")"

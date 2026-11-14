@@ -26,6 +26,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -123,12 +124,15 @@ def mft_record(attrs, in_use=True):
     return protect(bytes(r), 0x30, 3)
 
 
-def restart_page(version=(1, 1), in_use=0xFFFF, flags=0, lsn=100, magic=b"RSTR", page=4096):
+def restart_page(version=(1, 1), in_use=0xFFFF, flags=0, lsn=100, magic=b"RSTR", page=4096,
+                 chkdsk_lsn=0, usa=True):
     p = bytearray(page)
     p[0:4] = magic
-    struct.pack_into("<QII", p, 8, 0, page, page)
+    struct.pack_into("<qII", p, 8, chkdsk_lsn, page, page)
     struct.pack_into("<Hhh", p, 0x18, 0x48, version[1], version[0])
     struct.pack_into("<QHHHH", p, 0x48, lsn, 1, 0xFFFF, in_use, flags)
+    if not usa:     # chkdsk peut laisser une page CHKD sans fixups
+        return bytes(p)
     return protect(bytes(p), 0x28, page // 512 + 1)
 
 
@@ -139,7 +143,8 @@ LOG_CLUSTERS = 16
 
 
 def build_ntfs(path, *, log=None, dirty=False, label="RAGO-LIB", fragmented=False,
-               size=4 * 1024 * 1024, declared=None, break_volume_fixup=False):
+               size=4 * 1024 * 1024, declared=None, break_volume_fixup=False,
+               short_log_runs=False, short_resident=False):
     """Petit volume NTFS : secteur de démarrage, MFT 0-3, $LogFile, $Volume."""
     img = bytearray(size)
     bs = bytearray(512)
@@ -152,11 +157,23 @@ def build_ntfs(path, *, log=None, dirty=False, label="RAGO-LIB", fragmented=Fals
     bs[510:512] = b"\x55\xaa"
     img[0:512] = bs
     runs = [(1, LOG_LCN), (LOG_CLUSTERS - 1, LOG_LCN + 40)] if fragmented else [(LOG_CLUSTERS, LOG_LCN)]
-    rec2 = mft_record([attr_nonresident(0x80, runs, CLUSTER)])
+    log_attr = attr_nonresident(0x80, [(1, LOG_LCN)] if short_log_runs else runs, CLUSTER)
+    if short_log_runs:
+        # Taille annoncée complète, mais une seule plage d'un cluster dans
+        # l'enregistrement de base (la suite serait dans un autre enregistrement).
+        log_attr = bytearray(log_attr)
+        n = LOG_CLUSTERS * CLUSTER
+        struct.pack_into("<qqq", log_attr, 0x28, n, n, n)
+        log_attr = bytes(log_attr)
+    rec2 = mft_record([log_attr])
     vi = bytearray(12)
     vi[8], vi[9] = 3, 1
     struct.pack_into("<H", vi, 10, 1 if dirty else 0)
     rec3 = mft_record([attr_resident(0x60, label.encode("utf-16-le")), attr_resident(0x70, bytes(vi))])
+    if short_resident:
+        tiny = bytearray(16)        # attribut résident de 16 octets : trop court
+        struct.pack_into("<IIB", tiny, 0, 0x60, 16, 0)
+        rec3 = mft_record([bytes(tiny), attr_resident(0x70, bytes(vi))])
     if break_volume_fixup:
         rec3 = bytearray(rec3)
         rec3[1022] ^= 0xFF
@@ -234,6 +251,53 @@ class NtfsCheck(unittest.TestCase):
         self.assertEqual(st["logfile"], "unknown-version")
         self.assertFalse(st["rw_ok"])
 
+    def test_chkd_page_anywhere_is_refused(self):
+        # Relecture : une page CHKD plus récente (rangée par chkdsk_lsn chez
+        # ntfs-3g) ne doit pas être éclipsée par une page RSTR propre.
+        st = self.inspect(log=[(0, restart_page(lsn=1000)),
+                               (4096, restart_page(magic=b"CHKD", chkdsk_lsn=2000, lsn=500, in_use=0))])
+        self.assertEqual(st["logfile"], "chkdsk")
+        self.assertFalse(st["rw_ok"])
+
+    def test_chkd_page_without_fixups(self):
+        st = self.inspect(log=[(0, restart_page(magic=b"CHKD", usa=False))])
+        self.assertEqual(st["logfile"], "chkdsk")
+        self.assertFalse(st["rw_ok"])
+
+    def test_version_10_refused(self):
+        # ntfs-3g ne connaît que 1.1 et 2.0.
+        st = self.inspect(log=[(0, restart_page(version=(1, 0)))])
+        self.assertEqual(st["logfile"], "unknown-version")
+        self.assertFalse(st["rw_ok"])
+
+    def test_restart_header_inconsistent_is_doubt(self):
+        # Relecture : taille de page 8192 avec un tableau de fixups pour 4096
+        # (ntfs-3g rejette cette page et lit l'autre copie, ici en 2.0).
+        page0 = bytearray(restart_page(lsn=10))
+        struct.pack_into("<I", page0, 0x10, 8192)
+        st = self.inspect(log=[(0, bytes(page0)), (4096, restart_page(version=(2, 0), lsn=20))])
+        self.assertFalse(st["rw_ok"])
+        self.assertIn("incohérent", " ".join(st["reasons"]))
+
+    def test_rstr_with_chkdsk_lsn_is_doubt(self):
+        st = self.inspect(log=[(0, restart_page(chkdsk_lsn=5))])
+        self.assertFalse(st["rw_ok"])
+
+    def test_short_logfile_runs_is_doubt(self):
+        # Relecture : plages du journal incomplètes dans l'enregistrement de base ;
+        # la page 2.0 à 4096 serait invisible.
+        st = self.inspect(short_log_runs=True,
+                          log=[(0, restart_page(lsn=10)), (4096, restart_page(version=(2, 0), lsn=20))])
+        self.assertFalse(st["rw_ok"])
+        self.assertIn("plages incomplètes", " ".join(st["reasons"]))
+
+    def test_short_resident_attribute_is_doubt(self):
+        # Relecture : un attribut résident tronqué ne doit pas faire planter
+        # le contrôle (sinon même la lecture seule serait perdue).
+        st = self.inspect(short_resident=True)
+        self.assertFalse(st["rw_ok"])
+        self.assertIn("illisible", " ".join(st["reasons"]))
+
     def test_second_copy_used_when_first_damaged(self):
         bad = bytearray(b"\x00" * 4096)
         st = self.inspect(log=[(0, bytes(bad)), (4096, restart_page(in_use=0))])
@@ -306,6 +370,18 @@ class Decide(unittest.TestCase):
 
     def test_off_without_lib_found(self):
         self.assertTrue(rl.decide_from(state("off", found=False), None)[0])
+        self.assertTrue(rl.decide_from(state("off", found=False, online=False, offline=False, error=None), None)[0])
+
+    def test_off_not_found_with_error_is_doubt(self):
+        # Relecture : une erreur à l'arrêt (recherche ou mise hors ligne ratée)
+        # ne doit pas passer pour « Windows n'avait pas RAGO-LIB ».
+        for lib in ({"found": False, "error": "mountvol : accès refusé"},
+                    {"found": False, "online": True},
+                    {"found": None, "error": "RAGO-LIB en ligne à ce démarrage mais introuvable à l'arrêt"},
+                    {"found": True, "offline": False, "error": "Windows ne confirme pas RAGO-LIB hors ligne"}):
+            ok, why = rl.decide_from(state("off", **lib), None)
+            self.assertFalse(ok, lib)
+            self.assertIn("lecture seule", why)
 
     def test_doubts_are_read_only(self):
         for data in (None, b"{", b"[]", state("running", found=True, offline=False),
@@ -563,9 +639,13 @@ esac
     def tearDown(self):
         subprocess.run(["umount", self.lib_mnt], capture_output=True)
 
-    def lib(self, *args, stdin=None):
+    def lib(self, *args, stdin=None, path_prefix=None, env_extra=None):
         env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8",
-               "RAGO_LIBRARY_CONF": self.lib_conf, "RAGO_COMM_CONF": self.comm_conf}
+               "RAGO_LIBRARY_CONF": self.lib_conf, "RAGO_COMM_CONF": self.comm_conf,
+               "RAGO_LIBRARY_LOCK": os.path.join(self.d, "library.lock")}
+        if path_prefix:
+            env["PATH"] = path_prefix + ":" + env["PATH"]
+        env.update(env_extra or {})
         return subprocess.run(["bash", SCRIPT] + list(args), capture_output=True, text=True, env=env,
                               input=stdin, timeout=120)
 
@@ -710,6 +790,23 @@ esac
         self.assertEqual(self.lib("forget", "install-steam-730").returncode, 2)
         self.assertFalse(self.comm_mounted())
 
+    def test_request_records_partition(self):
+        # Relecture : sans montage préalable, Windows doit quand même connaître le PARTUUID.
+        env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8", "RAGO_COMM_CONF": self.comm_conf}
+        pu, se = "0a1b2c3d-1111-2222-3333-444455556666", "1122334455667788"
+        r = subprocess.run([sys.executable, "-I", HELPER, "request", "install", "steam", "570",
+                            "--partuuid", pu, "--serial", se], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        part = self.comm_read("library/partition.json")
+        self.assertEqual((part["partuuid"], part["ntfs_serial"]), (pu, se))
+        # Valeurs invalides : la requête passe, la note n'est pas touchée.
+        r = subprocess.run([sys.executable, "-I", HELPER, "request", "install", "steam", "440",
+                            "--partuuid", "pas-un-uuid", "--serial", "x"], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.comm_read("library/partition.json")["partuuid"], pu)
+        self.lib("cancel", "install-steam-570")
+        self.lib("cancel", "install-steam-440")
+
     def test_list_mounts_read_only_temporarily(self):
         self.windows_state("off")
         self.assertEqual(self.lib("mount", "--rw").returncode, 0)
@@ -750,6 +847,91 @@ esac
             p.kill()
             p.wait()
         self.assertEqual(self.lib("umount").returncode, 0)
+
+    # Relecture : un volume démonté ici mais encore ouvert ailleurs compte comme monté.
+    def assert_still_held_everywhere(self):
+        r = self.lib("umount")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("encore tenue par le noyau", r.stderr)
+        self.assertIn("NE PAS passer sous Windows", r.stderr)
+        r = self.lib("__sleep-guard")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("tenu par le noyau", r.stderr)
+        r = self.lib("mount", "--ro")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("encore tenue par le noyau", r.stderr)
+        self.assertIsNone(self.mode())
+
+    def test_lazy_umount_still_held(self):
+        self.lib("mount", "--ro")
+        p = subprocess.Popen(["sleep", "60"], cwd=self.lib_mnt)
+        try:
+            sh("umount", "-l", self.lib_mnt)
+            self.assertIsNone(self.mode())
+            self.assert_still_held_everywhere()
+        finally:
+            p.kill()
+            p.wait()
+        r = self.lib("umount")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.lib("__sleep-guard").returncode, 0)
+
+    @unittest.skipUnless(shutil.which("unshare"), "unshare requis")
+    def test_private_namespace_still_held(self):
+        # Cas de M4 : « apply » tourne dans un espace de noms privé, copie de
+        # tous les montages ; le démontage ici réussit mais le volume reste ouvert.
+        self.lib("mount", "--ro")
+        p = subprocess.Popen(["unshare", "--mount", "--propagation", "private", "sleep", "60"])
+        try:
+            mine = os.readlink("/proc/self/ns/mnt")
+            for _ in range(100):
+                try:
+                    if os.readlink(f"/proc/{p.pid}/ns/mnt") != mine:
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.05)
+            else:
+                self.skipTest("unshare --mount impossible ici")
+            r = self.lib("umount")
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("démontée de", r.stderr)
+            self.assertIn("encore tenue par le noyau", r.stderr)
+            self.assert_still_held_everywhere()
+        finally:
+            p.kill()
+            p.wait()
+        r = self.lib("umount")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.lib("__sleep-guard").returncode, 0)
+
+    def test_guard_waits_for_mount_lock(self):
+        lock = os.path.join(self.d, "library.lock")
+        p = subprocess.Popen(["flock", lock, "sleep", "60"], start_new_session=True)
+        try:
+            for _ in range(100):
+                if subprocess.run(["flock", "-n", lock, "true"]).returncode != 0:
+                    break
+                time.sleep(0.05)
+            r = self.lib("__sleep-guard", env_extra={"RAGO_LIBRARY_LOCK_WAIT": "1"})
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("montage de RAGO-LIB est en cours", r.stderr)
+        finally:
+            os.killpg(p.pid, 9)     # flock ET sleep (qui hérite du verrou)
+            p.wait()
+        self.assertEqual(self.lib("__sleep-guard").returncode, 0)
+
+    def test_mount_refused_while_sleep_starts(self):
+        stub = os.path.join(self.d, "stub-bin")
+        os.makedirs(stub, exist_ok=True)
+        with open(os.path.join(stub, "systemctl"), "w") as f:
+            f.write('#!/bin/sh\n[ "$1" = list-jobs ] && { echo "42 hibernate.target start waiting"; exit 0; }\nexit 1\n')
+        os.chmod(os.path.join(stub, "systemctl"), 0o755)
+        self.windows_state("off")
+        r = self.lib("mount", path_prefix=stub)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("hibernation est en cours", r.stderr)
+        self.assertIsNone(self.mode())
 
     def test_already_mounted_elsewhere_refused(self):
         other = os.path.join(self.d, "ailleurs")

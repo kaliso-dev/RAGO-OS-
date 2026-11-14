@@ -55,10 +55,12 @@
 # Aucune dissimulation : les jeux s'installent par les clients officiels, dans
 # Windows ; Linux ne fait que gérer, lister et déclencher.
 
+import errno
 import hashlib
 import json
 import os
 import re
+import stat
 import struct
 import subprocess
 import sys
@@ -330,7 +332,9 @@ def decide_from(state_bytes, confirm):
                        "prolongée, ou arrêté brutalement) : lecture seule")
     if state == "off":
         lib = st.get("lib") if isinstance(st.get("lib"), dict) else {}
-        if lib.get("found") is False:
+        # « pas trouvée » ne vaut que sans erreur et sans mise en ligne : une
+        # erreur à l'arrêt (recherche ou mise hors ligne ratée) est un doute.
+        if lib.get("found") is False and not lib.get("error") and lib.get("online") is not True:
             return True, "Windows éteint proprement ; il n'avait pas trouvé RAGO-LIB"
         if lib.get("offline") is True:
             return True, "Windows éteint proprement, RAGO-LIB vidée et hors ligne côté Windows"
@@ -410,7 +414,7 @@ def mst_fixup(buf, what):
 
 
 def resident_value(a, what):
-    if a[8] != 0:
+    if len(a) < 0x18 or a[8] != 0:
         raise NtfsError(f"{what} : attribut résident attendu")
     vlen, voff = struct.unpack_from("<IH", a, 0x10)
     if voff + vlen > len(a):
@@ -510,6 +514,10 @@ class Ntfs:
                 break
             chunk = min(length * self.cluster, n - len(out))
             out += b"\0" * chunk if lcn is None else self.pread(lcn * self.cluster, chunk)
+        if len(out) < n:
+            # Plages incomplètes (suite dans un autre enregistrement) : on ne
+            # conclut pas sur un début de journal tronqué.
+            raise NtfsError("plages incomplètes dans l'enregistrement de base")
         return bytes(out)
 
     def volume(self):
@@ -541,21 +549,47 @@ class Ntfs:
         return self.read_runs(runs, min(size, LOG_SCAN))
 
 
+RESTART_HDR_SIZE = 0x1E    # taille de l'en-tête d'une page de redémarrage
+LOG_VERSIONS = ((1, 1), (2, 0))
+
+
 def restart_page(head, pos):
-    """Page de redémarrage du journal à `pos`, ou None si ce n'en est pas une."""
+    """Page de redémarrage du journal à `pos`, ou None si ce n'en est pas une.
+
+    Mêmes contrôles d'en-tête que ntfs-3g (ntfs_check_restart_page_header) ;
+    mais là où ntfs-3g ignore une page douteuse pour lire l'autre copie, on
+    lève NtfsError : au doute, lecture seule.
+    """
     magic = head[pos:pos + 4]
-    if magic not in (b"RSTR", b"CHKD") or pos + 0x20 > len(head):
+    if magic not in (b"RSTR", b"CHKD") or pos + RESTART_HDR_SIZE > len(head):
         return None
-    page_size, = struct.unpack_from("<I", head, pos + 0x10)
-    if page_size < 512 or page_size & (page_size - 1) or pos + page_size > len(head):
-        raise NtfsError("$LogFile : taille de page de redémarrage invalide")
-    page = mst_fixup(head[pos:pos + page_size], "$LogFile (page de redémarrage)")
-    ra_ofs, minor, major = struct.unpack_from("<Hhh", page, 0x18)
-    if ra_ofs < 0x1E or ra_ofs + 16 > page_size:
+    usa_ofs, usa_count, chkdsk_lsn, page_size, log_page_size, ra_ofs, minor, major = \
+        struct.unpack_from("<HHqIIHhh", head, pos + 4)
+    for size in (page_size, log_page_size):
+        if size < MST_STRIDE or size & (size - 1):
+            raise NtfsError("$LogFile : taille de page de redémarrage invalide")
+    if pos not in (0, page_size):
+        raise NtfsError("$LogFile : page de redémarrage à une position incohérente")
+    if pos + page_size > len(head):
+        raise NtfsError("$LogFile : page de redémarrage hors du début du journal")
+    base = {"pos": pos, "magic": magic.decode(), "page_size": page_size, "version": (major, minor)}
+    if magic == b"CHKD":
+        # chkdsk est passé : on refuse l'écriture quel que soit le reste
+        # (ntfs-3g l'accepte si le journal est propre ; Rago est plus prudent).
+        return base
+    if chkdsk_lsn != 0:
+        raise NtfsError("$LogFile : page RSTR avec une marque de chkdsk")
+    if (major, minor) not in LOG_VERSIONS:
+        return dict(base, unknown=True)
+    usa_end = usa_ofs + 2 * usa_count
+    if (usa_count != page_size // MST_STRIDE + 1 or usa_ofs < RESTART_HDR_SIZE
+            or usa_end > MST_STRIDE - 2):
+        raise NtfsError("$LogFile : tableau de fixups de la page de redémarrage incohérent")
+    if ra_ofs & 7 or ra_ofs < usa_end or ra_ofs + 16 > page_size:
         raise NtfsError("$LogFile : zone de redémarrage hors de la page")
+    page = mst_fixup(head[pos:pos + page_size], "$LogFile (page de redémarrage)")
     current_lsn, _clients, _free, in_use, flags = struct.unpack_from("<QHHHH", page, ra_ofs)
-    return {"pos": pos, "magic": magic.decode(), "page_size": page_size, "version": (major, minor),
-            "current_lsn": current_lsn, "client_in_use_list": in_use, "flags": flags}
+    return dict(base, current_lsn=current_lsn, client_in_use_list=in_use, flags=flags)
 
 
 def logfile_state(head):
@@ -565,7 +599,8 @@ def logfile_state(head):
     vide ; page la plus récente (plus grand LSN) en version 2.0 = Windows a
     gardé des métadonnées en cache (veille prolongée, démarrage rapide, ou
     coupure brutale) ; client actif sans le drapeau « volume propre » = arrêt
-    pas propre.
+    pas propre. Plus prudent que ntfs-3g : une page marquée par chkdsk ou
+    d'une version inconnue, où qu'elle soit, suffit à refuser l'écriture.
     """
     pages = []
     first = restart_page(head, 0)
@@ -573,12 +608,14 @@ def logfile_state(head):
         pages.append(first)
         second = restart_page(head, first["page_size"]) if first["page_size"] < len(head) else None
         if second is not None:
+            if second["page_size"] != first["page_size"]:
+                raise NtfsError("$LogFile : les deux pages de redémarrage ne s'accordent pas")
             pages.append(second)
     else:
         if head.count(b"\xff") == len(head):
             return "empty", None
         # Première copie abîmée : chercher la seconde aux tailles de page possibles.
-        pos = 512
+        pos = MST_STRIDE
         while pos < len(head) and not pages:
             p = restart_page(head, pos)
             if p is not None:
@@ -586,15 +623,17 @@ def logfile_state(head):
             pos <<= 1
         if not pages:
             raise NtfsError("$LogFile : aucune page de redémarrage")
+    for p in pages:
+        if p["magic"] == "CHKD":
+            return "chkdsk", "%d.%d" % p["version"]
+    for p in pages:
+        if p.get("unknown"):
+            return "unknown-version", "%d.%d" % p["version"]
     latest = max(pages, key=lambda p: p["current_lsn"])
     major, minor = latest["version"]
     version = f"{major}.{minor}"
-    if latest["magic"] == "CHKD":
-        return "chkdsk", version
     if (major, minor) == (2, 0):
         return "windows-cache", version
-    if (major, minor) not in ((1, 1), (1, 0)):
-        return "unknown-version", version
     if latest["client_in_use_list"] != LOGFILE_NO_CLIENT and not latest["flags"] & RESTART_VOLUME_IS_CLEAN:
         return "unclean", version
     return "clean", version
@@ -604,7 +643,7 @@ LOG_REASONS = {
     "windows-cache": "le journal NTFS est en version 2.0 : Windows a gardé des métadonnées en cache "
                      "(veille prolongée, démarrage rapide, ou coupure brutale)",
     "unclean": "le journal NTFS a des transactions en cours : Windows ne s'est pas arrêté proprement",
-    "chkdsk": "chkdsk a marqué le journal NTFS : Windows doit finir la réparation",
+    "chkdsk": "chkdsk a marqué le journal NTFS : Windows doit vérifier le volume (démarrer le micro-Windows)",
     "unknown-version": "journal NTFS d'une version inconnue",
 }
 
@@ -629,6 +668,11 @@ def ntfs_inspect(dev):
     except NtfsError as e:
         out["reasons"].append(f"volume NTFS illisible ou incohérent : {e}")
         return out
+    except (struct.error, IndexError, ValueError) as e:
+        # Structure plus courte qu'annoncé : doute, comme NtfsError (la
+        # lecture seule reste possible, ntfs3 fera ses propres contrôles).
+        out["reasons"].append(f"volume NTFS illisible ou incohérent : structure tronquée ({e})")
+        return out
     except OSError as e:
         out["reasons"].append(f"lecture de {dev} impossible : {e.strerror}")
         return out
@@ -637,7 +681,8 @@ def ntfs_inspect(dev):
     if not out["size_ok"]:
         out["reasons"].append("le volume NTFS est plus grand que la partition (ntfs3 le monterait en lecture seule)")
     if out["dirty"]:
-        out["reasons"].append("le volume NTFS est marqué « sale » : à réparer par Windows (il le fait au démarrage)")
+        out["reasons"].append("le volume NTFS est marqué « sale » : à réparer par Windows (au prochain démarrage "
+                              "du micro-Windows, l'agent M7 la répare avant de s'en servir)")
     if state not in LOG_STATES_OK:
         out["reasons"].append(LOG_REASONS[state])
     out["rw_ok"] = not out["reasons"]
@@ -650,6 +695,40 @@ def cmd_ntfs_check(dev):
     if not st["ntfs"]:
         return 1
     return 0 if st["rw_ok"] else 3
+
+
+def cmd_claimed(devs):
+    """Périphériques encore tenus par le noyau : 0 au moins un, 1 aucun, 4 doute.
+
+    Le tableau des montages (findmnt) ne voit que l'espace de noms courant :
+    un montage resté vivant dans un espace de noms privé (mise à jour M4 en
+    cours, service isolé) ou démonté en différé (umount -l, fichier encore
+    ouvert) y est invisible, alors que le volume reste ouvert et en cache.
+    Un système de fichiers monté réserve son périphérique en exclusif :
+    open(O_EXCL) sur un périphérique bloc échoue alors avec EBUSY, quel que
+    soit l'espace de noms.
+    """
+    held, doubt = [], []
+    for dev in devs:
+        try:
+            if not stat.S_ISBLK(os.stat(dev).st_mode):
+                doubt.append(f"{dev} : pas un périphérique bloc")
+                continue
+            fd = os.open(dev, os.O_RDONLY | os.O_EXCL | getattr(os, "O_CLOEXEC", 0))
+        except OSError as e:
+            if e.errno == errno.EBUSY:
+                held.append(dev)
+            else:
+                doubt.append(f"{dev} : {e.strerror}")
+            continue
+        os.close(fd)
+    for d in held:
+        print(d)
+    for d in doubt:
+        log(f"contrôle impossible : {d}")
+    if held:
+        return 0
+    return 4 if doubt else 1
 
 
 def valid_partuuid(v):
@@ -764,12 +843,17 @@ def build_request(action, launcher, launcher_id, name=None):
     return req
 
 
-def cmd_request(conf, action, launcher, launcher_id, name):
+def cmd_request(conf, action, launcher, launcher_id, name, partuuid=None, serial=None):
     req = build_request(action, launcher, launcher_id, name)
     if launcher == "riot" and launcher_id not in RIOT_KNOWN:
         log(f"avertissement : produit Riot {launcher_id!r} inconnu de Rago (connus : {', '.join(RIOT_KNOWN)})")
     with Comm(conf) as comm:
         ensure_layout(comm)
+        # Windows retrouve RAGO-LIB hors ligne par son PARTUUID (partition.json) :
+        # noté aussi ici, pas seulement au montage (sinon un premier usage sans
+        # montage laisserait Windows chercher par l'étiquette, illisible hors ligne).
+        if partuuid and serial and valid_partuuid(partuuid) and valid_serial(serial):
+            record_partition(comm, partuuid, serial)
         write_json(comm.path("library", "requests", req["id"] + ".json"), req)
         # Une nouvelle demande remplace le résultat d'une précédente identique.
         old = comm.path("library", "results", req["id"] + ".json")
@@ -1028,8 +1112,8 @@ def cmd_init(lib_dir):
 
 USAGE = """usage : rago_library.py decide | confirm-off | status [--text]
        rago_library.py prepare-mount PÉRIPH auto|rw|ro [PARTUUID NUMÉRO|- -] [--no-ntfs]
-       rago_library.py ntfs-check PÉRIPH
-       rago_library.py request install|launch steam|epic|riot ID [--name NOM]
+       rago_library.py ntfs-check PÉRIPH | claimed PÉRIPH...
+       rago_library.py request install|launch steam|epic|riot ID [--name NOM] [--partuuid P --serial N]
        rago_library.py cancel ID | forget ID
        rago_library.py record-partition PARTUUID NUMÉRO_DE_SÉRIE
        rago_library.py list DOSSIER_RAGO_LIB|- [--text] [--mode MODE] | init DOSSIER_RAGO_LIB
@@ -1069,6 +1153,10 @@ def main(argv, env):
             if len(args) != 1:
                 raise Refused("ntfs-check PÉRIPHÉRIQUE")
             return cmd_ntfs_check(args[0])
+        if cmd == "claimed":
+            if not args:
+                raise Refused("claimed PÉRIPHÉRIQUE...")
+            return cmd_claimed(args)
         # RAGO_COMM_CONF : seulement pour les tests.
         conf = load_conf(env.get("RAGO_COMM_CONF", CONF_DEFAULT))
         if cmd == "decide" and not args:
@@ -1087,8 +1175,10 @@ def main(argv, env):
                 return cmd_prepare_mount(conf, args[0], args[1], pu, se, check_ntfs)
         if cmd == "request":
             name = pop_opt(args, "--name")
+            pu = pop_opt(args, "--partuuid")
+            se = pop_opt(args, "--serial")
             if len(args) == 3:
-                return cmd_request(conf, args[0], args[1], args[2], name)
+                return cmd_request(conf, args[0], args[1], args[2], name, pu, se)
         if cmd == "cancel" and len(args) == 1:
             return cmd_cancel(conf, args[0])
         if cmd == "forget" and len(args) == 1:

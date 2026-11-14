@@ -36,7 +36,10 @@
 # $LogFile vide ou propre, pas de cache de veille prolongée de Windows).
 # Hibernation de Linux refusée tant qu'un volume NTFS est monté (unité
 # rago-library-sleep-guard.service) : Windows pourrait démarrer pendant ce
-# temps (switch de M6).
+# temps (switch de M6). « Monté » se juge aussi au périphérique : un volume
+# démonté ici mais encore ouvert ailleurs (autre espace de noms, démontage
+# différé) compte comme monté. Un verrou (/run/rago/library.lock) empêche un
+# montage de croiser le garde d'hibernation.
 #
 # Codes de sortie : 0 fait ; 1 erreur ; 2 commande ou entrée refusée ;
 # 3 écriture refusée (doute) — « mount » sans option a quand même monté en
@@ -130,16 +133,55 @@ ntfs3_available() {
 	modprobe -q ntfs3 2>/dev/null && grep -qw ntfs3 /proc/filesystems 2>/dev/null
 }
 
+# Verrou partagé par « mount » et le garde d'hibernation : un montage ne
+# peut pas se finir pendant que le garde regarde (ni l'inverse).
+LOCK=${RAGO_LIBRARY_LOCK:-/run/rago/library.lock}
+lock_fd=""
+take_lock() { # take_lock SECONDES
+	[ -z "$lock_fd" ] || return 0
+	mkdir -p "$(dirname "$LOCK")" || return 1
+	exec {lock_fd}>> "$LOCK" || { lock_fd=""; return 1; }
+	flock -w "$1" "$lock_fd" || { exec {lock_fd}>&-; lock_fd=""; return 1; }
+}
+release_lock() {
+	[ -n "$lock_fd" ] || return 0
+	exec {lock_fd}>&-
+	lock_fd=""
+}
+
+# Le noyau tient-il encore ce périphérique (monté ici, ailleurs, dans un
+# autre espace de noms, ou démonté en différé) ? 0 oui ou doute, 1 non.
+claimed() {
+	local rc=0
+	helper claimed "$@" > /dev/null || rc=$?
+	[ "$rc" != 1 ]
+}
+
+# Une veille (hibernation, etc.) est-elle en train de démarrer ? 0 oui ou doute, 1 non.
+sleep_pending() {
+	local jobs
+	if ! jobs=$(systemctl list-jobs --no-legend --no-pager 2>/dev/null); then
+		# Sans systemd (conteneur de test) : aucune veille possible ; avec systemd : doute.
+		[ -d /run/systemd/system ] && return 0
+		return 1
+	fi
+	printf '%s\n' "$jobs" | grep -Eq '(^|[[:space:]])((sleep|suspend|hibernate|hybrid-sleep|suspend-then-hibernate)\.target|systemd-(suspend|hibernate|hybrid-sleep|suspend-then-hibernate)\.service)([[:space:]]|$)'
+}
+
+STILL_HELD="encore tenue par le noyau sans être montée ici (démontage différé « umount -l » avec un fichier ouvert, ou montage dans un autre espace de noms : mise à jour M4 en cours ?)"
+
 # --- mount -------------------------------------------------------------------------------------
 do_mount() { # do_mount auto|rw|ro
 	local want=$1 dev cur fstype label partuuid serial out rc mode elsewhere opts
 	local -a extra=()
 	need_root mount
 	dev=$(lib_device)
+	take_lock 30 || die "verrou $LOCK occupé (autre montage, ou hibernation en cours) : réessayer"
 	cur=$(mounted_mode)
 	if [ -n "$cur" ]; then
 		if { [ "$want" = ro ] && [ "$cur" = ro ]; } || { [ "$want" != ro ] && [ "$cur" = rw ]; }; then
 			say "RAGO-LIB déjà montée sur $RAGO_LIB_DIR ($([ "$cur" = rw ] && echo écriture || echo 'lecture seule'))"
+			release_lock
 			return 0
 		fi
 		say "RAGO-LIB montée en $([ "$cur" = rw ] && echo écriture || echo 'lecture seule') : démontage pour la remonter"
@@ -147,6 +189,10 @@ do_mount() { # do_mount auto|rw|ro
 	fi
 	elsewhere=$(findmnt -rn -S "$dev" -o TARGET 2>/dev/null | head -1 || true)
 	[ -z "$elsewhere" ] || die "RAGO-LIB ($dev) est déjà montée sur $elsewhere : la démonter d'abord (umount $elsewhere)"
+	# Un ancien montage encore vivant serait réutilisé tel quel par le noyau
+	# (sans relire le disque) : refus.
+	! claimed "$dev" || die "RAGO-LIB ($dev) $STILL_HELD : attendre la fin, ou redémarrer Linux"
+	! sleep_pending || die "une veille ou une hibernation est en cours : pas de montage maintenant"
 
 	fstype=$(blk TYPE "$dev")
 	label=$(blk LABEL "$dev")
@@ -187,23 +233,44 @@ for r in json.load(sys.stdin).get("reasons") or []: print("  - " + r)' >&2 || tr
 		die "montage de $dev sur $RAGO_LIB_DIR impossible (journal du noyau : journalctl -k | grep ntfs3)"
 	cur=$(mounted_mode)
 	[ "$(mounted_fstype)" = "$RAGO_LIB_FSTYPE" ] || { umount "$RAGO_LIB_DIR" || true; die "monté avec le pilote $(mounted_fstype) au lieu de $RAGO_LIB_FSTYPE : démonté"; }
+	if sleep_pending; then
+		umount "$RAGO_LIB_DIR" || true
+		die "une veille ou une hibernation a commencé pendant le montage : RAGO-LIB démontée"
+	fi
 	if [ "$mode" = rw ] && [ "$cur" != rw ]; then
 		warn "le noyau a monté RAGO-LIB en lecture seule (taille du volume ? journalctl -k | grep ntfs3)"
 		mode=ro
 	fi
 	if [ "$mode" = rw ]; then
 		helper init "$RAGO_LIB_DIR" || warn "préparation de .rago/ impossible"
+		release_lock
 		say "RAGO-LIB montée en ÉCRITURE sur $RAGO_LIB_DIR (démonter avant de passer sous Windows : rago-library umount)"
 		return 0
 	fi
+	release_lock
 	say "RAGO-LIB montée en LECTURE SEULE sur $RAGO_LIB_DIR"
 	[ "$want" = ro ] && return 0
 	return 3
 }
 
+# 0 si le périphérique de RAGO-LIB est libéré (ou absent), après au plus ~2 s.
+lib_released() {
+	local dev i
+	[ -e "$RAGO_LIB_DEVICE" ] || return 0
+	dev=$(readlink -f "$RAGO_LIB_DEVICE")
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		claimed "$dev" || return 0
+		[ "$i" = 10 ] || sleep 0.2
+	done
+	return 1
+}
+
 do_umount() {
 	need_root umount
 	if [ -z "$(mounted_mode)" ]; then
+		# Rien ici, mais le noyau peut encore tenir le volume ailleurs : M6 ne
+		# doit pas passer sous Windows sur la foi d'un « pas montée ».
+		lib_released || die "RAGO-LIB $STILL_HELD : NE PAS passer sous Windows ; attendre la fin, ou redémarrer Linux"
 		say "RAGO-LIB n'est pas montée"
 		return 0
 	fi
@@ -212,6 +279,7 @@ do_umount() {
 		fuser -vm "$RAGO_LIB_DIR" 2>&1 | sed 's/^/  /' >&2 || true
 		die "RAGO-LIB occupée (programmes ci-dessus) : les fermer puis recommencer"
 	fi
+	lib_released || die "RAGO-LIB démontée de $RAGO_LIB_DIR mais $STILL_HELD : NE PAS passer sous Windows ; attendre la fin, ou redémarrer Linux"
 	say "RAGO-LIB démontée"
 }
 
@@ -246,13 +314,21 @@ do_request() { # do_request install|launch LANCEUR ID [--name NOM]
 	local action=$1
 	shift
 	[ $# -ge 2 ] || refuse "$action steam|epic|riot ID [--name NOM]"
-	local launcher=$1 id=$2
+	local launcher=$1 id=$2 dev pu se
+	local -a part=()
 	shift 2
+	# Partition notée pour Windows en même temps (partition.json), si RAGO-LIB existe.
+	if [ -e "$RAGO_LIB_DEVICE" ] && [ "$RAGO_LIB_REQUIRE_NTFS" = 1 ]; then
+		dev=$(readlink -f "$RAGO_LIB_DEVICE")
+		pu=$(blk PART_ENTRY_UUID "$dev")
+		se=$(blk UUID "$dev")
+		if [ -n "$pu" ] && [ -n "$se" ]; then part=(--partuuid "$pu" --serial "$se"); fi
+	fi
 	if [ $# -gt 0 ]; then
 		[ "$1" = --name ] && [ $# -eq 2 ] || refuse "option inconnue : $*"
-		helper request "$action" "$launcher" "$id" --name "$2"
+		helper request "$action" "$launcher" "$id" --name "$2" "${part[@]}"
 	else
-		helper request "$action" "$launcher" "$id"
+		helper request "$action" "$launcher" "$id" "${part[@]}"
 	fi
 }
 
@@ -329,9 +405,17 @@ for r in d.get("reasons") or []: print("  --      " + r)'; then :; fi
 # Appelée par systemd juste avant une hibernation. NE TOUCHE PAS RAGO-COMM
 # (son unité de montage est en conflit avec sleep.target). Refuse si RAGO-LIB
 # ou n'importe quel volume NTFS est monté : pendant l'hibernation de Linux,
-# Windows peut démarrer (switch M6) et écrire sur ce volume.
+# Windows peut démarrer (switch M6) et écrire sur ce volume. Prend d'abord le
+# verrou de « mount » (un montage en cours se finit avant qu'on regarde), puis
+# regarde le tableau des montages ET les périphériques (un volume tenu dans
+# un autre espace de noms ou démonté en différé compte comme monté).
 do_sleep_guard() {
-	local found="" src target fstype rlib=""
+	local found="" src target fstype rlib="" name held rc
+	local -a devs=()
+	take_lock "${RAGO_LIBRARY_LOCK_WAIT:-12}" || {
+		printf 'rago-library : hibernation REFUSÉE : un montage de RAGO-LIB est en cours (verrou %s).\n' "$LOCK" >&2
+		exit 1
+	}
 	[ -e "$RAGO_LIB_DEVICE" ] && rlib=$(readlink -f "$RAGO_LIB_DEVICE")
 	# -r : espaces des chemins écrits \x20, trois champs par ligne.
 	while read -r src target fstype; do
@@ -347,6 +431,21 @@ do_sleep_guard() {
 			;;
 		esac
 	done < <(findmnt -rn -o SOURCE,TARGET,FSTYPE 2>/dev/null)
+	if [ -z "$found" ]; then
+		[ -n "$rlib" ] && devs+=("$rlib")
+		while read -r name fstype; do
+			[ "$fstype" = ntfs ] && [ "$name" != "$rlib" ] && devs+=("$name")
+		done < <(lsblk -rnpo NAME,FSTYPE 2>/dev/null || true)
+		if [ "${#devs[@]}" -gt 0 ]; then
+			rc=0
+			held=$(helper claimed "${devs[@]}") || rc=$?
+			case "$rc" in
+			0) found=" ${held//$'\n'/ } (tenu par le noyau hors de ce tableau des montages : autre espace de noms ou démontage différé)" ;;
+			1) ;;
+			*) found=" (contrôle des périphériques impossible : ${devs[*]})" ;;
+			esac
+		fi
+	fi
 	if [ -n "$found" ]; then
 		printf 'rago-library : hibernation REFUSÉE : volume(s) NTFS monté(s) :%s. Windows pourrait démarrer pendant la veille et les abîmer. Démonter d abord (rago-library umount).\n' "$found" >&2
 		exit 1
@@ -354,7 +453,7 @@ do_sleep_guard() {
 	exit 0
 }
 
-usage() { sed -n '3,46p' "$self" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,49p' "$self" | sed 's/^# \{0,1\}//'; }
 
 load_conf
 check_conf
