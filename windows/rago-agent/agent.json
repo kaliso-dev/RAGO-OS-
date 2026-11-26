@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "kind": "rago-agent-config",
+  "doc": "Agent de la bibliotheque partagee (M7). lib_letter : lettre de RAGO-LIB pendant la session de Windows (les clients gardent leurs chemins : elle ne doit pas changer). poll_seconds : intervalle de suivi des installations. job_timeout_hours : une requete encore ouverte apres ce temps dans une meme session de Windows passe en echec (le temps passe sous Linux ne compte pas).",
+  "lib_letter": "L",
+  "poll_seconds": 10,
+  "job_timeout_hours": 48
+}

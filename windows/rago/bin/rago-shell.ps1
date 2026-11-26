@@ -12,9 +12,13 @@
          tâche \Rago\Boot, compte SYSTEM) ; si un redémarrage est lancé pour
          appliquer le profil demandé par Linux, il l'annonce et ne fait rien ;
       2. affiche le profil demandé et l'état RÉEL (VBS, HVCI, Secure Boot, TPM) ;
-      3. propose un petit menu de maintenance : console, console
+      3. bibliothèque partagée (M7) : ouvre la fenêtre de l'agent
+         (C:\Rago\agent\rago-agent.ps1 -Session) qui prend les requêtes de
+         Linux et suit les installations ; elle se ferme seule quand il n'y a
+         plus rien en cours ;
+      4. propose un petit menu de maintenance : console, console
          administrateur (UAC), navigateur, lancer un programme, rapport M5,
-         retour à Linux (redémarrage), arrêt.
+         bibliothèque, retour à Linux (redémarrage), arrêt.
 
     Le lancement direct du jeu et le retour automatique vers Linux sont le
     travail de M6 (Fast OS Switch) : ce shell sera remplacé.
@@ -33,6 +37,30 @@ Set-RagoLogName 'shell'
 
 $Host.UI.RawUI.WindowTitle = 'Rago - micro-Windows (M5)'
 $statusPath = Join-Path (Get-RagoDataDir) 'security-status.json'
+$agent = Join-Path (Get-RagoRootDir) 'agent\rago-agent.ps1'
+$ps = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+# Fenêtre de l'agent de la bibliothèque (M7), compte du joueur.
+function Start-RagoLibrarySession {
+    if (-not (Test-Path -LiteralPath $agent)) { Write-Host 'Bibliothèque : agent absent de cette image (C:\Rago\agent).'; return }
+    Start-Process -FilePath $ps -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $agent, '-Session', '-WaitSeconds', '300')
+}
+
+function Invoke-RagoLibraryMenu {
+    if (-not (Test-Path -LiteralPath $agent)) { Write-Host 'Bibliothèque : agent absent de cette image (C:\Rago\agent).'; return }
+    & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File $agent -Status
+    Write-Host '[R] Relancer la fenêtre de la bibliothèque   [A] Abandonner une requête   [Entrée] Retour'
+    $b = Read-Host 'Choix'
+    if ($null -eq $b) { return }
+    switch ($b.Trim().ToUpperInvariant()) {
+        'R' { Start-RagoLibrarySession }
+        'A' {
+            $id = Read-Host 'Identifiant de la requête (ex. install-steam-730)'
+            if ($id) { & $ps -NoLogo -NoProfile -ExecutionPolicy Bypass -File $agent -Abandon $id.Trim() }
+        }
+        default { }
+    }
+}
 
 function Read-RagoStatusForThisBoot {
     param([string]$BootId)
@@ -91,6 +119,7 @@ function Invoke-RagoChoice {
             break
         }
         '5' { Show-RagoLastReport; break }
+        'B' { Invoke-RagoLibraryMenu; break }
         'S' { Show-RagoStatus (Read-RagoStatusForThisBoot (Get-RagoBootId)); break }
         'L' {
             Write-RagoLog 'retour à Linux demandé (redémarrage)'
@@ -125,11 +154,14 @@ if ($null -ne $status -and $status.reboot -eq 'started') {
 # --- 2. affichage ------------------------------------------------------------------------------
 Show-RagoStatus $status
 
-# --- 3. menu de maintenance ----------------------------------------------------------------------
+# --- 3. bibliothèque partagée (M7) ----------------------------------------------------------------
+try { Start-RagoLibrarySession } catch { Write-Host ('Bibliothèque : ' + $_.Exception.Message) -ForegroundColor Yellow }
+
+# --- 4. menu de maintenance ----------------------------------------------------------------------
 while ($true) {
     Write-Host ''
     Write-Host '[1] Console   [2] Console administrateur   [3] Navigateur   [4] Lancer un programme'
-    Write-Host '[5] Rapport M5   [S] Etat de securite   [L] Retour a Linux (redemarrer)   [E] Eteindre'
+    Write-Host '[5] Rapport M5   [B] Bibliotheque   [S] Etat de securite   [L] Retour a Linux (redemarrer)   [E] Eteindre'
     $c = Read-Host 'Choix'
     if ($null -eq $c) { continue }
     Invoke-RagoChoice $c

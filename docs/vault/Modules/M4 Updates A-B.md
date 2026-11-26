@@ -71,6 +71,9 @@ statut: EN COURS
 ## Exigence pour le micro-Windows (décision du 14/11)
 « passer les cumulatifs courants via -UpdatePath à chaque reconstruction de l'image » : le micro-Windows ne se met pas à jour en ligne ([[M5 Micro-Windows]]) ; quand une mise à jour de Rago reconstruit son image, elle doit intégrer les mises à jour cumulatives du moment (`windows/compile_micro_engine.ps1 -UpdatePath`). Rien n'est codé dans M4 pour ça (M4 met à jour la racine Linux) ; à faire quand la reconstruction de Windows sera conçue ([[Questions ouvertes]]).
 
+## Effet sur la bibliothèque partagée (constaté le 14/11, M7)
+`apply` tourne dans un espace de noms de montage privé (`unshare --mount --propagation private`, `host/manage_atomic_updates.sh`), qui copie tous les montages. Si RAGO-LIB ([[M7 Bibliothèque partagée]]) était montée au lancement d'`apply`, elle reste ouverte dans cet espace de noms jusqu'à la fin de la mise à jour : `rago-library umount` répond alors code 1 et la bascule vers Windows doit attendre. M4 n'a pas été modifié ; garder ainsi ou démonter RAGO-LIB dans l'espace de noms d'`apply` : à décider ([[Questions ouvertes]]).
+
 **Dépend de / relié à :** [[M3 Chiffrement LUKS]] (volumes, TPM), [[M5 Micro-Windows]] (cumulatifs à chaque reconstruction), [[M0 Noyau scx_rago]] (clé MOK, noyau, `kernel.conf`), [[Sécurité et boot]], [[M13 Build ISO]] (images signées), [[M6 Fast OS Switch]] (hibernation, entrée à usage unique), [[M12 Installateur]].
 
 **Critère de test.** update → boot passif ; échec simulé → rollback auto ; UKI modifiée refusée par Secure Boot.

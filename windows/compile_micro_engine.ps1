@@ -27,7 +27,8 @@
          ajoutés (-DriverPath). Les pilotes inbox ne sont pas retirables par DISM ;
       5. ruches hors ligne : services de bruit / d'interface coupés (jamais ceux de
          la sécurité), base VBS + HVCI posée puis RELUE, télémétrie, Fast Startup ;
-      6. charge utile Rago : C:\Rago (verrouillé), SetupComplete.cmd, micro-engine.json ;
+      6. charge utile Rago : C:\Rago (verrouillé), SetupComplete.cmd, micro-engine.json,
+         agent de la bibliothèque partagée (M7, C:\Rago\agent, depuis -AgentPath) ;
       7. magasin de composants nettoyé (StartComponentCleanup + ResetBase), puis
          .NET 3.5 depuis l'ISO, puis sauvegardes, caches, journaux et WinRE effacés ;
       8. démontage, export final : max (LZX, .wim) ou recovery (LZMS solide, .esd) ;
@@ -72,6 +73,9 @@
     Windows la plus récente est passée à DISM, qui prend les « checkpoint »
     dont il a besoin dans le même dossier ; celle de .NET (nom avec « ndp »)
     est appliquée après .NET 3.5 (ordre documenté par Microsoft).
+.PARAMETER AgentPath
+    Dossier de l'agent de la bibliothèque partagée (M7), copié dans
+    C:\Rago\agent (défaut : windows\rago-agent du dépôt).
 .PARAMETER Hibernation
     off (défaut, décision du 14/11 : le micro-Windows est sans état, il ne
     s'hiberne jamais lui-même ; l'hibernation du switch est celle de Linux, M6)
@@ -98,6 +102,7 @@ param(
     [string]$PlanPath = (Join-Path $PSScriptRoot 'micro_engine_plan.json'),
     [string]$UnattendPath = (Join-Path $PSScriptRoot 'autounattend.xml'),
     [string]$PayloadPath = (Join-Path $PSScriptRoot 'rago'),
+    [string]$AgentPath = (Join-Path $PSScriptRoot 'rago-agent'),
     [string]$UpdatePath,
     [string]$DriverPath,
     [string]$RedistPath,
@@ -165,7 +170,8 @@ if (-not (Test-Path -LiteralPath $SourcePath)) {
     throw ('source introuvable : {0}. Rago ne fournit pas Windows : télécharge toi-même l''ISO Windows 11 chez Microsoft (licence à toi).' -f $SourcePath)
 }
 foreach ($f in @($PlanPath, $UnattendPath, (Join-Path $PayloadPath 'bin\rago-security.ps1'), (Join-Path $PayloadPath 'setup\firstboot.ps1'),
-        (Join-Path $PayloadPath 'setup\SetupComplete.cmd'), (Join-Path $PayloadPath 'tasks\rago-boot.xml'))) {
+        (Join-Path $PayloadPath 'setup\SetupComplete.cmd'), (Join-Path $PayloadPath 'tasks\rago-boot.xml'),
+        (Join-Path $AgentPath 'rago-agent.ps1'), (Join-Path $AgentPath 'launchers.json'))) {
     if (-not (Test-Path -LiteralPath $f)) { throw ('fichier du dépôt manquant : ' + $f) }
 }
 if ($PlayerName -notmatch '^[A-Za-z0-9][A-Za-z0-9 ._-]{0,19}$' -or $PlayerName.EndsWith('.')) { throw '-PlayerName : 1 à 20 caractères (lettres, chiffres, espace . _ -)' }
@@ -191,6 +197,7 @@ $WorkWim = Join-Path $WorkDir 'work.wim'
 $PlanPath = (Resolve-Path -LiteralPath $PlanPath).Path
 $UnattendPath = (Resolve-Path -LiteralPath $UnattendPath).Path
 $PayloadPath = (Resolve-Path -LiteralPath $PayloadPath).Path
+$AgentPath = (Resolve-Path -LiteralPath $AgentPath).Path
 foreach ($opt in @('UpdatePath', 'DriverPath', 'RedistPath')) {
     $v = Get-Variable -Name $opt -ValueOnly
     if ($v) {
@@ -641,6 +648,12 @@ try {
     if (Test-Path -LiteralPath $rago) { Remove-RagoPath $rago }
     New-Item -ItemType Directory -Path $rago -Force | Out-Null
     foreach ($sub in @('bin', 'setup', 'tasks')) { Copy-Item -LiteralPath (Join-Path $PayloadPath $sub) -Destination $rago -Recurse -Force }
+    # Agent de la bibliothèque partagée (M7) : C:\Rago\agent.
+    $agentDst = Join-Path $rago 'agent'
+    New-Item -ItemType Directory -Path $agentDst -Force | Out-Null
+    foreach ($f in @(Get-ChildItem -LiteralPath $AgentPath -File | Where-Object { $_.Extension -in @('.ps1', '.psm1', '.json', '.md') })) {
+        Copy-Item -LiteralPath $f.FullName -Destination $agentDst -Force
+    }
     if ($RedistPath) { Copy-Item -LiteralPath $RedistPath -Destination (Join-Path $rago 'redist') -Recurse -Force }
     $scripts = Join-Path $Mount 'Windows\Setup\Scripts'
     New-Item -ItemType Directory -Path $scripts -Force | Out-Null

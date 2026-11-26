@@ -28,6 +28,7 @@ WIN = os.path.dirname(HERE)
 REPO = os.path.dirname(WIN)
 PAYLOAD = os.path.join(WIN, "rago")
 BIN = os.path.join(PAYLOAD, "bin")
+AGENT = os.path.join(WIN, "rago-agent")
 PS_FILES = sorted(glob.glob(os.path.join(WIN, "**", "*.ps1"), recursive=True) +
                   glob.glob(os.path.join(WIN, "**", "*.psm1"), recursive=True))
 HOOK = os.path.join(REPO, "host", "hooks", "windows-security")
@@ -189,7 +190,7 @@ class CrossReferences(unittest.TestCase):
         for p in PS_FILES:
             for m in re.finditer(r"'(rago-[a-z]+\.ps1|RagoComm\.psm1|setup\\firstboot\.ps1|tasks\\rago-boot\.xml)'", read(p)):
                 n = m.group(1).replace("\\", os.sep)
-                ok = os.path.exists(os.path.join(BIN, n)) or os.path.exists(os.path.join(PAYLOAD, n))
+                ok = any(os.path.exists(os.path.join(d, n)) for d in (BIN, PAYLOAD, AGENT))
                 self.assertTrue(ok, "%s appelle %s, absent" % (p, n))
 
     def test_parameters_exist(self):
